@@ -1,0 +1,11 @@
+# Replace these paths with your prepared YOLO-format dataset locations.
+path: ./datasets/aerial
+train: images/train
+val: images/val
+test: images/test
+
+# Keep this focused. Add or remove classes only if the labelled dataset matches.
+names:
+  0: person
+  1: vehicle
+  2: hazard_signature

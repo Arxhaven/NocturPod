@@ -1,0 +1,8 @@
+ultralytics>=8.3.0
+opencv-python>=4.9.0
+albumentations>=1.4.0
+PyYAML>=6.0
+numpy>=1.26.0
+flask>=3.0.0
+# Optional on the Raspberry Pi when live MAVLink telemetry is available:
+# pymavlink>=2.4.41

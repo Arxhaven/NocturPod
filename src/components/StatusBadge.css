@@ -1,0 +1,87 @@
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  position: relative;
+  text-transform: uppercase;
+  background: rgba(11, 43, 38, 0.6);
+  border: 1px solid rgba(142, 182, 155, 0.2);
+  transition: all var(--transition-fast);
+}
+
+.status-badge.size-small {
+  padding: 2px 6px;
+  font-size: 10px;
+  gap: 4px;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  background-color: currentColor;
+}
+
+.status-dot-pulse {
+  position: absolute;
+  left: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: currentColor;
+  opacity: 0.75;
+  animation: pulse-ring 2s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+.size-small .status-dot-pulse {
+  left: 6px;
+}
+
+/* Color palettes based on restraint */
+.status-online {
+  color: #8EB69B;
+  border-color: rgba(142, 182, 155, 0.3);
+  background: rgba(22, 56, 50, 0.45);
+}
+
+.status-armed {
+  color: #DAF1DE;
+  border-color: rgba(218, 241, 222, 0.3);
+  background: rgba(35, 83, 71, 0.5);
+}
+
+.status-recording {
+  color: #ff7875;
+  border-color: rgba(255, 120, 117, 0.35);
+  background: rgba(114, 38, 42, 0.4);
+}
+
+.status-processing {
+  color: #91caff;
+  border-color: rgba(145, 202, 255, 0.3);
+  background: rgba(20, 48, 77, 0.4);
+}
+
+.status-warning {
+  color: #ffd591;
+  border-color: rgba(255, 213, 145, 0.3);
+  background: rgba(89, 58, 26, 0.4);
+}
+
+.status-error {
+  color: #ff4d4f;
+  border-color: rgba(255, 77, 79, 0.4);
+  background: rgba(92, 24, 26, 0.5);
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(2.6); opacity: 0; }
+}

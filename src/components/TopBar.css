@@ -1,0 +1,113 @@
+.topbar-container {
+  height: var(--header-height);
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(5, 31, 32, 0.7);
+  border-bottom: 1px solid var(--border-muted);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  position: sticky;
+  top: 0;
+  z-index: 15;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+}
+
+.page-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.topbar-title {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-light-green);
+}
+
+.topbar-subtitle {
+  font-size: 11px;
+  color: var(--color-muted-sage);
+  opacity: 0.8;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.telemetry-bar {
+  display: flex;
+  align-items: center;
+  background: rgba(11, 43, 38, 0.6);
+  border: 1px solid rgba(142, 182, 155, 0.16);
+  border-radius: 6px;
+  padding: 4px 12px;
+  gap: 10px;
+}
+
+.telemetry-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--color-muted-sage);
+}
+
+.telemetry-icon {
+  color: var(--color-muted-sage);
+  opacity: 0.7;
+}
+
+.telemetry-icon.active {
+  color: var(--color-light-green);
+  opacity: 1;
+}
+
+.telemetry-divider {
+  width: 1px;
+  height: 12px;
+  background: rgba(142, 182, 155, 0.2);
+}
+
+.quick-trigger-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: linear-gradient(135deg, rgba(35, 83, 71, 0.8) 0%, rgba(22, 56, 50, 0.9) 100%);
+  border: 1px solid var(--color-muted-sage);
+  color: var(--color-light-green);
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  transition: all var(--transition-fast);
+  box-shadow: 0 0 10px rgba(142, 182, 155, 0.15);
+}
+
+.quick-trigger-btn:hover {
+  background: var(--color-medium-green);
+  border-color: var(--color-light-green);
+  box-shadow: 0 0 15px rgba(218, 241, 222, 0.25);
+  transform: translateY(-1px);
+}
+
+.quick-trigger-btn:active {
+  transform: translateY(0);
+}
+
+@media (max-width: 1024px) {
+  .telemetry-bar {
+    display: none;
+  }
+}

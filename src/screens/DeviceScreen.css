@@ -1,0 +1,129 @@
+.device-screen-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: fadeIn 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.device-summary-strip {
+  padding: 16px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.dev-strip-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dev-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dev-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-light-green);
+  letter-spacing: 0.05em;
+}
+
+.dev-meta {
+  font-size: 10px;
+  color: var(--color-muted-sage);
+  opacity: 0.8;
+}
+
+.dev-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 4px;
+  background: rgba(11, 43, 38, 0.7);
+  border: 1px solid var(--border-muted);
+  color: var(--color-light-green);
+  font-size: 11px;
+  transition: all var(--transition-fast);
+}
+
+.dev-action-btn:hover {
+  background: var(--color-medium-green);
+  border-color: var(--color-light-green);
+}
+
+.subsystems-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+}
+
+.subsystem-card {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.sub-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-muted);
+  padding-bottom: 10px;
+}
+
+.sub-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sub-icon {
+  color: var(--color-muted-sage);
+}
+
+.sub-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--color-light-green);
+}
+
+.sub-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.sub-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.s-label {
+  color: var(--color-muted-sage);
+  opacity: 0.75;
+}
+
+.s-val {
+  color: var(--color-light-green);
+  font-weight: 500;
+}
+
+.s-val.active {
+  color: #52c41a;
+}
+
+@media (max-width: 900px) {
+  .subsystems-grid {
+    grid-template-columns: 1fr;
+  }
+}
