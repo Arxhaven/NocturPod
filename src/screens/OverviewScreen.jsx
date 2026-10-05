@@ -39,7 +39,7 @@ export default function OverviewScreen({
             <span className="node-name">NOCTURPOD // α-1</span>
             <StatusBadge status={deviceStatus?.status ?? 'ONLINE'} size="small" />
           </div>
-          <span className="node-spec mono">RPI4-B • SONY/OV5647 IR-CUT • AM312 PIR • 20,000mAh UNIT</span>
+          <span className="node-spec mono">RPI4-B (8GB) • OV5647 IR-CUT • 850nm DUAL MATRIX • 20,000mAh UNIT</span>
         </div>
 
         <div className="node-status-grid">
@@ -48,8 +48,8 @@ export default function OverviewScreen({
             <span className="item-val mono active">{deviceStatus?.cameraStatus ?? 'ONLINE'}</span>
           </div>
           <div className="status-item">
-            <span className="item-label mono">PIR SENSOR</span>
-            <span className="item-val mono active">{deviceStatus?.pirStatus ?? 'ARMED'}</span>
+            <span className="item-label mono">SPOOL BUFFER</span>
+            <span className="item-val mono active">ARMED (Nominal)</span>
           </div>
           <div className="status-item">
             <span className="item-label mono">STORAGE</span>
@@ -94,6 +94,8 @@ export default function OverviewScreen({
             claheActive={claheActive}
             onToggleClahe={onToggleClahe}
             irNightMode={deviceStatus?.irNightMode ?? 'AUTO_ACTIVE'}
+            streamResolution={deviceStatus?.streamResolution ?? '1920×1080'}
+            cameraStatus={deviceStatus?.cameraStatus ?? 'ONLINE'}
           />
 
           {/* Under-feed compact metric blocks */}
@@ -101,7 +103,7 @@ export default function OverviewScreen({
             <MetricCard 
               label="MOTION EVENTS TODAY" 
               value={metrics?.motionEventsToday ?? 19} 
-              subtext="PIR triggers registered"
+              subtext="Edge vision triggers"
               icon={Activity}
               trend="+3 in last hour"
             />

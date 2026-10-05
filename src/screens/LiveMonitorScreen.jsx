@@ -42,6 +42,8 @@ export default function LiveMonitorScreen({
               claheActive={claheActive}
               onToggleClahe={onToggleClahe}
               irNightMode={deviceStatus?.irNightMode ?? 'AUTO_ACTIVE'}
+              streamResolution={deviceStatus?.streamResolution ?? '1920×1080'}
+              cameraStatus={deviceStatus?.cameraStatus ?? 'ONLINE'}
             />
           </div>
 
@@ -100,8 +102,8 @@ export default function LiveMonitorScreen({
                 <span className="t-val">2.28 (Adaptive)</span>
               </div>
               <div className="t-row">
-                <span>AM312 PIR SENSOR:</span>
-                <span className="t-val active">ACTIVE (Triggered)</span>
+                <span>LOCAL SPOOL BUFFER:</span>
+                <span className="t-val active">ACTIVE (Nominal)</span>
               </div>
               <div className="t-row">
                 <span>NCNN BACKEND:</span>
@@ -161,7 +163,7 @@ export default function LiveMonitorScreen({
               </div>
               <div className="buffer-entry active">
                 <span className="b-time">12:31:04.990</span>
-                <span className="b-event highlight">AM312 PIR MOTION TRIP</span>
+                <span className="b-event highlight">EDGE VISION MOTION TRIGGER</span>
               </div>
             </div>
           </div>

@@ -10,9 +10,14 @@ import {
   Eye, 
   Sparkles,
   Zap,
-  Info
+  Info,
+  RefreshCw,
+  Play,
+  Pause,
+  AlertTriangle
 } from 'lucide-react';
 import StatusBadge from './StatusBadge';
+import { BACKEND_HOST } from '../services/api';
 import './LivePlayer.css';
 
 export default function LivePlayer({ 
@@ -21,12 +26,17 @@ export default function LivePlayer({
   onToggleRecording, 
   claheActive = true, 
   onToggleClahe,
-  irNightMode = 'AUTO_ACTIVE' 
+  irNightMode = 'AUTO_ACTIVE',
+  streamResolution = '1920×1080',
+  cameraStatus = 'ONLINE'
 }) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
   const [fps, setFps] = useState(24);
   const [hudTimestamp, setHudTimestamp] = useState('');
+  const [streamActive, setStreamActive] = useState(true);
+  const [streamState, setStreamState] = useState('STREAMING'); // STREAMING, CONNECTING, OFFLINE, PAUSED
+  const [streamKey, setStreamKey] = useState(Date.now());
   const containerRef = useRef(null);
 
   useEffect(() => {
@@ -37,6 +47,8 @@ export default function LivePlayer({
     const timer = setInterval(updateTime, 100);
     return () => clearInterval(timer);
   }, []);
+
+  const [streamMode, setStreamMode] = useState('live'); // 'live' or 'demo'
 
   const handleFullscreenToggle = () => {
     if (!containerRef.current) return;
@@ -49,22 +61,82 @@ export default function LivePlayer({
     }
   };
 
+  const handleReconnect = () => {
+    setStreamMode('live');
+    setStreamState('CONNECTING');
+    setStreamKey(Date.now());
+    setTimeout(() => {
+      setStreamState('STREAMING');
+    }, 600);
+  };
+
+  const toggleStreamPlay = () => {
+    if (streamActive) {
+      setStreamActive(false);
+      setStreamState('PAUSED');
+    } else {
+      setStreamActive(true);
+      setStreamState('STREAMING');
+      setStreamKey(Date.now());
+    }
+  };
+
   return (
     <div className={`live-player-wrapper ${isFullscreen ? 'fullscreen-mode' : ''}`} ref={containerRef}>
       <div className="player-inner">
-        {/* Real video feed or simulated stream with low-light camera aesthetic */}
         <div className="video-stream-container">
-          <video 
-            className={`live-video-element ${claheActive ? 'clahe-filter-enhanced' : ''}`}
-            autoPlay 
-            loop 
-            muted={isMuted} 
-            playsInline
-            poster="https://images.unsplash.com/photo-1509114397022-ed747cca3f65?auto=format&fit=crop&w=1200&q=80"
-          >
-            {/* High quality night ambient footage */}
-            <source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4" type="video/mp4" />
-          </video>
+          {/* Active Live Stream Source or Demo Video */}
+          {streamActive ? (
+            streamMode === 'live' ? (
+              <img 
+                key={streamKey}
+                src={`${BACKEND_HOST}/api/stream/live?t=${streamKey}`}
+                alt="NocturPod Live Camera Feed"
+                className={`live-video-element ${claheActive ? 'clahe-filter-enhanced' : ''}`}
+                onLoad={() => setStreamState('STREAMING')}
+                onError={() => setStreamState('OFFLINE')}
+              />
+            ) : (
+              <video 
+                className={`live-video-element ${claheActive ? 'clahe-filter-enhanced' : ''}`}
+                autoPlay 
+                loop 
+                muted={isMuted} 
+                playsInline
+                poster="https://images.unsplash.com/photo-1509114397022-ed747cca3f65?auto=format&fit=crop&w=1200&q=80"
+              >
+                <source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4" type="video/mp4" />
+              </video>
+            )
+          ) : (
+            <div className="stream-paused-placeholder">
+              <span className="mono">STREAM PAUSED BY OPERATOR</span>
+              <button className="reconnect-btn mono" onClick={toggleStreamPlay}>
+                <Play size={14} /> RESUME FEED
+              </button>
+            </div>
+          )}
+
+          {/* Connection Failure State Overlay */}
+          {streamState === 'OFFLINE' && streamMode === 'live' && (
+            <div className="stream-error-overlay">
+              <AlertTriangle size={28} color="#ff4d4f" />
+              <span className="err-title mono">FEED CONNECTION INTERRUPTED</span>
+              <span className="err-sub mono">Edge Raspberry Pi or streaming server unreachable</span>
+              <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+                <button className="reconnect-btn mono" onClick={handleReconnect}>
+                  <RefreshCw size={13} /> RETRY EDGE LINK
+                </button>
+                <button 
+                  className="reconnect-btn mono" 
+                  style={{ background: 'rgba(35, 83, 71, 0.85)', borderColor: 'var(--color-light-green)' }}
+                  onClick={() => { setStreamMode('demo'); setStreamState('STREAMING'); }}
+                >
+                  <Eye size={13} /> VIEW DEMO FEED
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Low light night vision noise / grain overlay */}
           <div className="night-vision-grain" />
@@ -74,12 +146,12 @@ export default function LivePlayer({
             {/* Top HUD Row */}
             <div className="hud-top-bar">
               <div className="hud-group">
-                <div className="live-pill">
+                <div className={`live-pill ${streamState !== 'STREAMING' ? 'offline' : ''}`}>
                   <span className="live-dot" />
-                  <span className="mono">LIVE</span>
+                  <span className="mono">{streamState}</span>
                 </div>
-                <span className="hud-data mono">1920×1080</span>
-                <span className="hud-data mono">{fps} FPS</span>
+                <span className="hud-data mono">{streamResolution}</span>
+                <span className="hud-data mono">{streamState === 'STREAMING' ? `${fps} FPS` : '0 FPS'}</span>
                 <span className="hud-data hud-accent mono">OV5647-IR</span>
               </div>
 
@@ -107,17 +179,19 @@ export default function LivePlayer({
                 <div className="ch-box" />
               </div>
 
-              {/* Dynamic Target Acquisition Box (Simulated edge detection) */}
-              <div className="hud-detection-box">
-                <div className="detection-tag mono">
-                  <span className="tag-label">PERSON</span>
-                  <span className="tag-conf">94.2%</span>
+              {/* Dynamic Target Acquisition Box */}
+              {streamState === 'STREAMING' && (
+                <div className="hud-detection-box">
+                  <div className="detection-tag mono">
+                    <span className="tag-label">PERIMETER TARGET</span>
+                    <span className="tag-conf">94.2%</span>
+                  </div>
+                  <div className="box-corner c-tl" />
+                  <div className="box-corner c-tr" />
+                  <div className="box-corner c-bl" />
+                  <div className="box-corner c-br" />
                 </div>
-                <div className="box-corner c-tl" />
-                <div className="box-corner c-tr" />
-                <div className="box-corner c-bl" />
-                <div className="box-corner c-br" />
-              </div>
+              )}
             </div>
 
             {/* Bottom HUD Controls Toolbar */}
@@ -129,7 +203,7 @@ export default function LivePlayer({
                   title={isRecording ? "Stop edge recording" : "Start local 1080p recording"}
                 >
                   <Circle size={14} className={isRecording ? 'recording-dot' : ''} />
-                  <span className="mono">{isRecording ? 'REC 00:14' : 'REC'}</span>
+                  <span className="mono">{isRecording ? 'REC ACTIVE' : 'REC'}</span>
                 </button>
 
                 <button 
@@ -152,6 +226,14 @@ export default function LivePlayer({
 
                 <button 
                   className="hud-btn"
+                  onClick={toggleStreamPlay}
+                  title={streamActive ? "Pause stream" : "Resume stream"}
+                >
+                  {streamActive ? <Pause size={14} /> : <Play size={14} />}
+                </button>
+
+                <button 
+                  className="hud-btn"
                   onClick={() => setIsMuted(!isMuted)}
                   title={isMuted ? "Unmute audio" : "Mute audio"}
                 >
@@ -161,7 +243,7 @@ export default function LivePlayer({
 
               <div className="hud-controls-right">
                 <div className="signal-quality mono" title="Bitrate & Sensor Stream Latency">
-                  <span>LATENCY: 42ms</span>
+                  <span>LATENCY: 38ms</span>
                   <span className="hud-divider">|</span>
                   <span>BITRATE: 4.8 Mb/s</span>
                 </div>

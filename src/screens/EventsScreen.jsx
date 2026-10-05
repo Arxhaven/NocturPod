@@ -46,7 +46,7 @@ export default function EventsScreen({ events, onSelectEvent }) {
             className={`filter-chip mono ${filterType === 'MOTION_TRIGGERED' ? 'active' : ''}`}
             onClick={() => setFilterType('MOTION_TRIGGERED')}
           >
-            PIR MOTION
+            MOTION DETECTED
           </button>
           <button 
             className={`filter-chip mono ${filterType === 'FOOTAGE_RECORDED' ? 'active' : ''}`}

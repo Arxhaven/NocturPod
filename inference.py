@@ -97,6 +97,7 @@ class EvidenceWorker:
             connection.execute(f"INSERT INTO detections ({columns}) VALUES ({placeholders})", tuple(row.values()))
             connection.commit()
             self.queue.task_done()
+            
         connection.close()
 
 

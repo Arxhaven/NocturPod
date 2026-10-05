@@ -122,40 +122,40 @@ export default function DeviceScreen({ deviceStatus, onRefreshTelemetry }) {
           </div>
         </div>
 
-        {/* PIR Motion Sensor Card */}
+        {/* Edge Buffer & Spool Subsystem Card */}
         <div className="subsystem-card glass-panel">
           <div className="sub-header">
             <div className="sub-title-wrap">
               <ShieldCheck size={16} className="sub-icon" />
-              <span className="sub-title">PIR MOTION SENSOR</span>
+              <span className="sub-title">LOCAL BUFFER & SPOOL QUEUE</span>
             </div>
-            <StatusBadge status={deviceStatus?.pirStatus ?? 'ARMED'} size="small" />
+            <StatusBadge status="ONLINE" size="small" />
           </div>
 
           <div className="sub-body mono">
             <div className="sub-row">
-              <span className="s-label">DETECTOR TYPE:</span>
-              <span className="s-val">AM312 Micro Pyroelectric</span>
+              <span className="s-label">BUFFER CAPACITY:</span>
+              <span className="s-val">500 MB Bounded FIFO</span>
             </div>
             <div className="sub-row">
-              <span className="s-label">TRIGGER LATENCY:</span>
-              <span className="s-val active">&lt; 150 µs Edge Interrupt</span>
+              <span className="s-label">SPOOL DIRECTORY:</span>
+              <span className="s-val active">storage/edge_spool/</span>
             </div>
             <div className="sub-row">
-              <span className="s-label">DETECTION RANGE:</span>
-              <span className="s-val">100° Cone • Up to 5 Meters</span>
+              <span className="s-label">NETWORK RESILIENCE:</span>
+              <span className="s-val">Partition-Tolerant Auto Retry</span>
             </div>
             <div className="sub-row">
-              <span className="s-label">GPIO PIN:</span>
-              <span className="s-val">BCM GPIO 17 (Pin 11)</span>
+              <span className="s-label">DAEMON PROCESS:</span>
+              <span className="s-val">nocturpod-agent.service (systemd)</span>
             </div>
             <div className="sub-row">
-              <span className="s-label">PULSE RE-TRIGGER:</span>
-              <span className="s-val">ENABLED (Non-repeat mode)</span>
+              <span className="s-label">PERSISTENCE:</span>
+              <span className="s-val">SQLite 3 WAL Relational Store</span>
             </div>
             <div className="sub-row">
-              <span className="s-label">INTERRUPT SERVICE:</span>
-              <span className="s-val">Edge Daemon Active</span>
+              <span className="s-label">AUTH CREDENTIAL:</span>
+              <span className="s-val">X-Device-Token Authenticated</span>
             </div>
           </div>
         </div>

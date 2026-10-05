@@ -14,17 +14,26 @@ import {
 import './SettingsScreen.css';
 
 export default function SettingsScreen({ deviceStatus, onSaveSettings }) {
-  const [deviceName, setDeviceName] = useState('NocturPod α-1');
-  const [pirSensitivity, setPirSensitivity] = useState('HIGH');
+  const [deviceName, setDeviceName] = useState(deviceStatus?.name ?? 'NocturPod α-1');
+  const [motionSensitivity, setMotionSensitivity] = useState('HIGH');
   const [claheClipLimit, setClaheClipLimit] = useState(2.2);
   const [videoClipDuration, setVideoClipDuration] = useState(30);
-  const [streamQuality, setStreamQuality] = useState('1080P_24FPS');
+  const [streamQuality, setStreamQuality] = useState(deviceStatus?.streamResolution ?? '1080P_24FPS');
   const [lowConfidenceCapture, setLowConfidenceCapture] = useState(true);
   const [autoIrNightSync, setAutoIrNightSync] = useState(true);
   const [toastMessage, setToastMessage] = useState('');
 
-  const handleSave = () => {
-    setToastMessage('Hardware configuration dispatched to edge node.');
+  const handleSave = async () => {
+    if (onSaveSettings) {
+      await onSaveSettings({
+        deviceName,
+        streamQuality,
+        irNightMode: autoIrNightSync ? 'AUTO_ACTIVE' : 'MANUAL_OFF',
+        claheClipLimit,
+        videoClipDuration
+      });
+    }
+    setToastMessage('Hardware configuration dispatched and committed to edge node.');
     setTimeout(() => setToastMessage(''), 3000);
   };
 
@@ -155,15 +164,15 @@ export default function SettingsScreen({ deviceStatus, onSaveSettings }) {
           </div>
 
           <div className="setting-field">
-            <label className="field-label">PIR MOTION SENSITIVITY</label>
+            <label className="field-label">EDGE MOTION & VISION SENSITIVITY</label>
             <select 
               className="field-select mono"
-              value={pirSensitivity}
-              onChange={(e) => setPirSensitivity(e.target.value)}
+              value={motionSensitivity}
+              onChange={(e) => setMotionSensitivity(e.target.value)}
             >
-              <option value="HIGH">HIGH (Immediate 120µs trigger)</option>
-              <option value="MEDIUM">MEDIUM (Filter short transient noise)</option>
-              <option value="LOW">LOW (Large movement only)</option>
+              <option value="HIGH">HIGH (Immediate low-latency trigger)</option>
+              <option value="MEDIUM">MEDIUM (Balanced optical threshold)</option>
+              <option value="LOW">LOW (High movement threshold only)</option>
             </select>
           </div>
         </div>

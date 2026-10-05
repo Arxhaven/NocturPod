@@ -50,6 +50,14 @@ runs/
 *.tar.gz
 *.rar
 
+# Runtime Storage
+storage/*.db*
+storage/*.sqlite
+storage/media/*
+storage/edge_spool/*
+!storage/media/.gitkeep
+!storage/edge_spool/.gitkeep
+
 # Environment variables
 .env
 .env.local
