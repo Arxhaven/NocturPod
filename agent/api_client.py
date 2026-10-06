@@ -19,16 +19,20 @@ class NocturPodApiClient:
         self.session.headers.update({
             "X-Device-Token": self.token
         })
+        print(f"[API Client] Configured target: {self.backend_url} (Token: {self.token[:4]}****)")
 
     def send_heartbeat(self, telemetry: dict[str, Any]) -> bool:
+        url = f"{self.backend_url}/api/device/heartbeat"
         try:
-            res = self.session.post(
-                f"{self.backend_url}/api/device/heartbeat",
-                json=telemetry,
-                timeout=4.0
-            )
-            return res.status_code == 200
-        except Exception:
+            res = self.session.post(url, json=telemetry, timeout=5.0)
+            if res.status_code == 200:
+                print(f"[Heartbeat] -> OK (Status: {telemetry.get('status')}, Temp: {telemetry.get('cpu_temp_c')}°C)")
+                return True
+            else:
+                print(f"[Heartbeat] -> Failed with HTTP {res.status_code}: {res.text}")
+                return False
+        except Exception as e:
+            print(f"[Heartbeat] -> Connection error contacting {url}: {e}")
             return False
 
     def poll_commands(self) -> list[dict[str, Any]]:
@@ -39,8 +43,13 @@ class NocturPodApiClient:
             )
             if res.status_code == 200:
                 data = res.json()
-                return data.get("commands", [])
-        except Exception:
+                cmds = data.get("commands", [])
+                if cmds:
+                    print(f"[Commands] Received {len(cmds)} command(s)")
+                return cmds
+            elif res.status_code == 401:
+                print("[Commands] Unauthorized: Check NOCTURPOD_DEVICE_TOKEN match with Render backend")
+        except Exception as e:
             pass
         return []
 
@@ -89,7 +98,12 @@ class NocturPodApiClient:
                     data=data,
                     timeout=30.0
                 )
-                return res.status_code in (200, 202)
+                if res.status_code in (200, 202):
+                    print(f"[Upload] Successfully uploaded {file_path.name} ({media_type})")
+                    return True
+                else:
+                    print(f"[Upload] Upload failed ({res.status_code}): {res.text}")
+                    return False
         except Exception as e:
             print(f"[API Client] Media upload failed for {file_path.name}: {e}")
             return False
