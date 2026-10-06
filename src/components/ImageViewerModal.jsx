@@ -1,29 +1,26 @@
 import React, { useState } from 'react';
 import { 
   X, 
-  ChevronLeft, 
-  ChevronRight, 
-  ZoomIn, 
-  ZoomOut, 
   Download, 
-  Cpu, 
   Sparkles, 
-  Layers,
-  Calendar,
+  Image as ImageIcon,
+  CheckCircle2,
   Clock,
-  Crosshair
+  AlertCircle
 } from 'lucide-react';
 import './ImageViewerModal.css';
 
-export default function ImageViewerModal({ image, onClose, onPrev, onNext }) {
-  const [zoomLevel, setZoomLevel] = useState(1);
-  const [showBoxes, setShowBoxes] = useState(true);
-  const [claheSim, setClaheSim] = useState(true);
+export default function ImageViewerModal({ image, onClose }) {
+  const [viewMode, setViewMode] = useState('ENHANCED'); // 'ENHANCED' or 'ORIGINAL'
 
   if (!image) return null;
 
-  const handleZoomIn = () => setZoomLevel((z) => Math.min(z + 0.3, 2.5));
-  const handleZoomOut = () => setZoomLevel((z) => Math.max(z - 0.3, 0.7));
+  const originalUrl = image.original_url || image.url;
+  const enhancedUrl = image.enhanced_url || image.thumbnail_url || image.thumbnail;
+  const isEnhancedReady = image.processing_status === 'COMPLETE' && enhancedUrl;
+  const isEnhancing = image.processing_status === 'PROCESSING' || image.processing_status === 'PENDING';
+
+  const activeDisplayUrl = viewMode === 'ENHANCED' && isEnhancedReady ? enhancedUrl : originalUrl;
 
   return (
     <div className="viewer-backdrop" onClick={onClose}>
@@ -31,50 +28,67 @@ export default function ImageViewerModal({ image, onClose, onPrev, onNext }) {
         {/* Top Header */}
         <div className="viewer-header">
           <div className="viewer-title-group">
-            <span className="viewer-id mono">{image.id}</span>
-            <h2 className="viewer-title">{image.title || 'Edge Capture'}</h2>
+            <span className="viewer-id mono">{image.event_id || image.id}</span>
+            <div className="viewer-status-indicator">
+              {isEnhancedReady ? (
+                <span className="tag-complete mono"><CheckCircle2 size={13} /> ENHANCED</span>
+              ) : isEnhancing ? (
+                <span className="tag-processing mono"><Clock size={13} /> ENHANCING...</span>
+              ) : (
+                <span className="tag-original mono">ORIGINAL ONLY</span>
+              )}
+            </div>
           </div>
 
           <div className="viewer-actions">
-            <button 
-              className={`viewer-btn ${showBoxes ? 'active' : ''}`}
-              onClick={() => setShowBoxes(!showBoxes)}
-              title="Toggle AI Detection Bounding Boxes"
-            >
-              <Crosshair size={14} />
-              <span className="mono">BOUNDING BOXES</span>
-            </button>
-
-            <button 
-              className={`viewer-btn ${claheSim ? 'active' : ''}`}
-              onClick={() => setClaheSim(!claheSim)}
-              title="Toggle CLAHE Low-Light Enhancement"
-            >
-              <Sparkles size={14} />
-              <span className="mono">CLAHE</span>
-            </button>
-
-            <div className="viewer-btn-group">
-              <button className="viewer-btn icon" onClick={handleZoomOut} title="Zoom Out">
-                <ZoomOut size={15} />
+            {/* Toggle Between Original and Enhanced */}
+            <div className="mode-toggle-group">
+              <button 
+                className={`mode-toggle-btn mono ${viewMode === 'ORIGINAL' ? 'active' : ''}`}
+                onClick={() => setViewMode('ORIGINAL')}
+              >
+                <ImageIcon size={14} />
+                <span>ORIGINAL</span>
               </button>
-              <span className="zoom-indicator mono">{(zoomLevel * 100).toFixed(0)}%</span>
-              <button className="viewer-btn icon" onClick={handleZoomIn} title="Zoom In">
-                <ZoomIn size={15} />
+              <button 
+                className={`mode-toggle-btn mono ${viewMode === 'ENHANCED' ? 'active' : ''}`}
+                onClick={() => setViewMode('ENHANCED')}
+                disabled={!isEnhancedReady}
+                title={!isEnhancedReady ? "Enhancement not ready yet" : undefined}
+              >
+                <Sparkles size={14} />
+                <span>AI ENHANCED</span>
               </button>
             </div>
 
-            <a 
-              href={image.url} 
-              download={`nocturpod-${image.id}.jpg`} 
-              target="_blank" 
-              rel="noreferrer"
-              className="viewer-btn"
-              title="Download full-resolution capture"
-            >
-              <Download size={14} />
-              <span>RAW</span>
-            </a>
+            {/* Download Buttons */}
+            {originalUrl && (
+              <a 
+                href={originalUrl} 
+                download={`nocturpod-${image.event_id || image.id}-original.jpg`} 
+                target="_blank" 
+                rel="noreferrer"
+                className="viewer-btn mono"
+                title="Download original capture"
+              >
+                <Download size={14} />
+                <span>ORIGINAL</span>
+              </a>
+            )}
+
+            {enhancedUrl && isEnhancedReady && (
+              <a 
+                href={enhancedUrl} 
+                download={`nocturpod-${image.event_id || image.id}-enhanced.jpg`} 
+                target="_blank" 
+                rel="noreferrer"
+                className="viewer-btn highlight mono"
+                title="Download AI enhanced capture"
+              >
+                <Download size={14} />
+                <span>ENHANCED</span>
+              </a>
+            )}
 
             <button className="viewer-close-btn" onClick={onClose} aria-label="Close modal">
               <X size={18} />
@@ -84,77 +98,35 @@ export default function ImageViewerModal({ image, onClose, onPrev, onNext }) {
 
         {/* Center Canvas / Media */}
         <div className="viewer-canvas">
-          {onPrev && (
-            <button className="nav-arrow left" onClick={onPrev} title="Previous image">
-              <ChevronLeft size={24} />
-            </button>
-          )}
-
           <div className="media-stage">
-            <div 
-              className="image-render-box"
-              style={{ transform: `scale(${zoomLevel})` }}
-            >
+            {activeDisplayUrl ? (
               <img 
-                src={image.url} 
-                alt={image.title} 
-                className={`full-view-img ${claheSim ? 'clahe-active' : ''}`} 
+                src={activeDisplayUrl} 
+                alt={image.event_id || 'NocturPod Capture'} 
+                className="viewer-media-image"
               />
-
-              {/* Bounding boxes overlays */}
-              {showBoxes && image.boundingBoxes && image.boundingBoxes.map((box, i) => (
-                <div 
-                  key={i}
-                  className="ai-bbox"
-                  style={{
-                    left: `${box.x1}%`,
-                    top: `${box.y1}%`,
-                    width: `${box.x2 - box.x1}%`,
-                    height: `${box.y2 - box.y1}%`,
-                  }}
-                >
-                  <span className="ai-bbox-label mono">
-                    {box.label} {(box.confidence * 100).toFixed(1)}%
-                  </span>
-                </div>
-              ))}
-            </div>
+            ) : (
+              <div className="no-media-box mono">
+                <AlertCircle size={28} />
+                <span>MEDIA CURRENTLY UNAVAILABLE</span>
+              </div>
+            )}
           </div>
-
-          {onNext && (
-            <button className="nav-arrow right" onClick={onNext} title="Next image">
-              <ChevronRight size={24} />
-            </button>
-          )}
         </div>
 
-        {/* Bottom Metadata Drawer */}
-        <div className="viewer-footer">
+        {/* Footer Metadata */}
+        <div className="viewer-meta-strip">
           <div className="meta-cell">
-            <span className="meta-label">TIMESTAMP</span>
-            <span className="meta-value mono">{image.timestamp}</span>
+            <span className="meta-label mono">EVENT ID</span>
+            <span className="meta-val mono">{image.event_id || image.id}</span>
           </div>
-
           <div className="meta-cell">
-            <span className="meta-label">SENSOR & RESOLUTION</span>
-            <span className="meta-value mono">{image.resolution || '1920×1080'} / OV5647</span>
+            <span className="meta-label mono">ACTIVE VIEW</span>
+            <span className="meta-val mono active">{viewMode}</span>
           </div>
-
           <div className="meta-cell">
-            <span className="meta-label">EXPOSURE & GAIN</span>
-            <span className="meta-value mono">{image.iso || 'ISO 1600'} • {image.shutter || '1/40s'}</span>
-          </div>
-
-          <div className="meta-cell">
-            <span className="meta-label">AI CLASSIFICATION</span>
-            <span className="meta-value tag-value mono">
-              {image.aiTag || 'None'} ({image.confidence ? (image.confidence * 100).toFixed(1) + '%' : 'N/A'})
-            </span>
-          </div>
-
-          <div className="meta-cell">
-            <span className="meta-label">EVENT LINK</span>
-            <span className="meta-value mono">{image.eventId || 'Manual Snap'}</span>
+            <span className="meta-label mono">STATUS</span>
+            <span className="meta-val mono">{image.processing_status || 'COMPLETE'}</span>
           </div>
         </div>
       </div>

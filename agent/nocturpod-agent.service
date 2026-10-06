@@ -8,19 +8,18 @@ Type=simple
 User=pi
 Group=pi
 WorkingDirectory=/home/pi/NocturPod
-ExecStart=/home/pi/NocturPod/.venv/bin/python -u agent/nocturpod_agent.py --backend http://127.0.0.1:5000
+ExecStart=/home/pi/NocturPod/.venv/bin/python -u agent/main.py
 Restart=always
 RestartSec=5s
 Environment=PYTHONUNBUFFERED=1
 Environment=NOCTURPOD_DEVICE_ID=nocturpod-edge-01
-Environment=NOCTURPOD_DEVICE_TOKEN=nocturpod-sec-key-2026
+Environment=NOCTURPOD_BACKEND_URL=https://your-nocturpod-backend.onrender.com
+Environment=NOCTURPOD_DEVICE_TOKEN=nocturpod-sec-key-replace-with-secure-token
 
-# Sandbox and hardware protections
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-AmbientCapabilities=CAP_NET_BIND_SERVICE
+# Filesystem permissions
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=/home/pi/NocturPod/storage
+ReadWritePaths=/home/pi/nocturpod/media /home/pi/NocturPod/storage
 
 [Install]
 WantedBy=multi-user.target

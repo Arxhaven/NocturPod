@@ -1,10 +1,14 @@
-"""NocturPod Backend Entrypoint
-Maintains backwards compatibility with `python api_server.py` while running the full
-production server with streaming, media storage, device management, and AI inference.
+"""NocturPod Backend Entrypoint for Render and Local Gunicorn
+Usage:
+    gunicorn api_server:app
+    python api_server.py
 """
 from __future__ import annotations
 
+import os
 from backend.server import app, run_server
 
 if __name__ == "__main__":
-    run_server(host="127.0.0.1", port=5000, debug=False)
+    port = int(os.getenv("PORT", "5000"))
+    host = os.getenv("HOST", "0.0.0.0")
+    run_server(host=host, port=port, debug=False)

@@ -1,8 +1,9 @@
-ultralytics>=8.3.0
-opencv-python>=4.9.0
-albumentations>=1.4.0
-PyYAML>=6.0
-numpy>=1.26.0
+# NocturPod Python Dependencies
 flask>=3.0.0
-# Optional on the Raspberry Pi when live MAVLink telemetry is available:
-# pymavlink>=2.4.41
+gunicorn>=21.2.0
+opencv-python-headless>=4.9.0
+numpy>=1.26.0
+psutil>=5.9.0
+requests>=2.31.0
+PyYAML>=6.0
+ultralytics>=8.3.0

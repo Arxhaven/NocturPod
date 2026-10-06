@@ -10,46 +10,32 @@ import LiveMonitorScreen from './screens/LiveMonitorScreen';
 import EventsScreen from './screens/EventsScreen';
 import FootageScreen from './screens/FootageScreen';
 import ImagesScreen from './screens/ImagesScreen';
-import AIScreen from './screens/AIScreen';
 import DeviceScreen from './screens/DeviceScreen';
-import SettingsScreen from './screens/SettingsScreen';
 
-import { 
-  INITIAL_DEVICE_STATUS, 
-  INITIAL_METRICS, 
-  INITIAL_EVENTS, 
-  INITIAL_FOOTAGE, 
-  INITIAL_IMAGES, 
-  INITIAL_AI_SUMMARY 
-} from './data/mockData';
+import { EMPTY_DEVICE_STATUS } from './data/mockData';
 import { 
   checkBackendHealth, 
   fetchDeviceStatus, 
   fetchEvents, 
   fetchImages, 
   fetchFootage, 
-  fetchAiSummary, 
-  fetchMetrics, 
   triggerSnapshot, 
-  toggleRecording,
-  saveDeviceSettings 
+  toggleRecording
 } from './services/api';
 import './App.css';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [deviceStatus, setDeviceStatus] = useState(INITIAL_DEVICE_STATUS);
-  const [metrics, setMetrics] = useState(INITIAL_METRICS);
-  const [events, setEvents] = useState(INITIAL_EVENTS);
-  const [footage, setFootage] = useState(INITIAL_FOOTAGE);
-  const [images, setImages] = useState(INITIAL_IMAGES);
-  const [aiSummary, setAiSummary] = useState(INITIAL_AI_SUMMARY);
+  const [deviceStatus, setDeviceStatus] = useState(EMPTY_DEVICE_STATUS);
+  const [events, setEvents] = useState([]);
+  const [footage, setFootage] = useState([]);
+  const [images, setImages] = useState([]);
+  const [backendOnline, setBackendOnline] = useState(false);
 
   const [selectedImage, setSelectedImage] = useState(null);
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
-  const [claheActive, setClaheActive] = useState(true);
   const [toastNotification, setToastNotification] = useState(null);
 
   const showToast = useCallback((msg) => {
@@ -60,194 +46,145 @@ export default function App() {
   // Synchronize data from backend
   const refreshAllData = useCallback(async () => {
     try {
-      const [dev, met, evts, imgs, foot, ai] = await Promise.all([
+      const [dev, evts, imgs, foot] = await Promise.all([
         fetchDeviceStatus(),
-        fetchMetrics(),
         fetchEvents(),
         fetchImages(),
-        fetchFootage(),
-        fetchAiSummary()
+        fetchFootage()
       ]);
-      if (dev) setDeviceStatus(dev);
-      if (met) setMetrics(met);
-      if (evts && evts.length > 0) setEvents(evts);
-      if (imgs && imgs.length > 0) setImages(imgs);
-      if (foot && foot.length > 0) setFootage(foot);
-      if (ai) setAiSummary(ai);
+      if (dev) {
+        setDeviceStatus(dev);
+        if (dev.status === 'RECORDING') {
+          setIsRecording(true);
+        } else if (dev.status === 'ONLINE' && isRecording) {
+          setIsRecording(false);
+        }
+      }
+      if (evts) setEvents(evts);
+      if (imgs) setImages(imgs);
+      if (foot) setFootage(foot);
     } catch (err) {
-      console.warn("Background data refresh notice:", err);
+      console.warn("Data sync notice:", err);
     }
-  }, []);
+  }, [isRecording]);
 
-  // Check Python API backend health on launch
+  // Check Backend health and poll telemetry
   useEffect(() => {
     async function verifyBackend() {
       const health = await checkBackendHealth();
       if (health.connected) {
-        showToast(`Backend Connected • Model: ${health.data.ai_engine || 'YOLOv8n'}`);
+        setBackendOnline(true);
         refreshAllData();
+      } else {
+        setBackendOnline(false);
       }
     }
     verifyBackend();
 
-    // Regular polling for device telemetry & heartbeat
     const interval = setInterval(() => {
       fetchDeviceStatus().then(dev => {
-        if (dev) setDeviceStatus(dev);
+        if (dev) {
+          setDeviceStatus(dev);
+          setBackendOnline(true);
+        } else {
+          setBackendOnline(false);
+        }
       });
-      fetchMetrics().then(met => {
-        if (met) setMetrics(met);
-      });
-    }, 3500);
+      // Periodically refresh captures/events if active tab requires it
+      if (activeTab === 'events' || activeTab === 'images' || activeTab === 'footage') {
+        refreshAllData();
+      }
+    }, 3000);
 
     return () => clearInterval(interval);
-  }, [refreshAllData, showToast]);
+  }, [activeTab, refreshAllData]);
 
   const handleQuickCapture = async () => {
     try {
-      showToast('Dispatching snapshot request to NocturPod edge node...');
+      showToast('Dispatching capture command to NocturPod edge node...');
       const res = await triggerSnapshot();
-      showToast(`Capture command [${res.command_id}] queued. Edge node processing...`);
+      showToast(`Capture queued [${res.command_id}]. Acquiring frame & enhancing...`);
       
-      // Allow edge node 1.5 seconds to acquire frame, upload, and run AI
+      // Refresh after a brief delay for edge acquisition & enhancement
       setTimeout(async () => {
-        const [updatedImgs, updatedEvts, updatedMetrics] = await Promise.all([
+        const [updatedImgs, updatedEvts] = await Promise.all([
           fetchImages(),
-          fetchEvents(),
-          fetchMetrics()
+          fetchEvents()
         ]);
-        if (updatedImgs && updatedImgs.length > 0) {
-          setImages(updatedImgs);
-          setSelectedImage(updatedImgs[0]);
-          showToast(`Still frame captured and committed to Images.`);
-        }
-        if (updatedEvts && updatedEvts.length > 0) setEvents(updatedEvts);
-        if (updatedMetrics) setMetrics(updatedMetrics);
-      }, 1800);
+        if (updatedImgs) setImages(updatedImgs);
+        if (updatedEvts) setEvents(updatedEvts);
+      }, 2500);
     } catch (err) {
-      showToast(`Snapshot error: ${err.message}`);
+      showToast(`Capture Error: ${err.message}`);
     }
   };
 
-  const handleToggleRecording = async () => {
-    const nextState = !isRecording;
-    setIsRecording(nextState);
+  const handleToggleRecording = async (nextRecordingState) => {
     try {
-      await toggleRecording(nextState);
-      if (nextState) {
-        showToast('1080p H.264 stream recording initiated on edge node.');
-      } else {
-        showToast('Recording stopped. Finalizing clip and spooling to storage...');
+      const actionText = nextRecordingState ? 'START RECORDING' : 'STOP RECORDING';
+      showToast(`Dispatching ${actionText} to edge node...`);
+      await toggleRecording(nextRecordingState);
+      setIsRecording(nextRecordingState);
+      showToast(nextRecordingState ? 'Recording initiated' : 'Recording stopped. Processing...');
+
+      if (!nextRecordingState) {
+        // Refresh recordings after stop
         setTimeout(async () => {
-          const [updatedFootage, updatedEvts, updatedMetrics] = await Promise.all([
+          const [updatedFoot, updatedEvts] = await Promise.all([
             fetchFootage(),
-            fetchEvents(),
-            fetchMetrics()
+            fetchEvents()
           ]);
-          if (updatedFootage && updatedFootage.length > 0) setFootage(updatedFootage);
-          if (updatedEvts && updatedEvts.length > 0) setEvents(updatedEvts);
-          if (updatedMetrics) setMetrics(updatedMetrics);
-          showToast('New video clip available in Footage.');
-        }, 2000);
+          if (updatedFoot) setFootage(updatedFoot);
+          if (updatedEvts) setEvents(updatedEvts);
+        }, 3000);
       }
     } catch (err) {
-      showToast(`Recording control notice: ${err.message}`);
+      showToast(`Record Error: ${err.message}`);
     }
   };
-
-  const handleToggleClahe = () => {
-    setClaheActive(!claheActive);
-    showToast(`CLAHE Adaptive Luminance: ${!claheActive ? 'ENABLED' : 'BYPASSED'}`);
-  };
-
-  const handleSaveSettings = async (settings) => {
-    try {
-      await saveDeviceSettings(settings);
-      showToast('Hardware preferences persisted to NocturPod edge node.');
-      const updated = await fetchDeviceStatus();
-      if (updated) setDeviceStatus(updated);
-    } catch (err) {
-      showToast(`Settings error: ${err.message}`);
-    }
-  };
-
-  const getTabTitles = () => {
-    switch (activeTab) {
-      case 'overview':
-        return { title: 'Overview', subtitle: 'SYSTEM SUMMARY & PRIMARY FEED' };
-      case 'live':
-        return { title: 'Live Monitor', subtitle: 'TACTICAL REAL-TIME OPTICAL FEED & HUD' };
-      case 'events':
-        return { title: 'Sensor Events', subtitle: 'CHRONOLOGICAL SENSOR AUDIT TRAIL' };
-      case 'footage':
-        return { title: 'Recorded Footage', subtitle: '1080P H.264 LOCAL VIDEO ARCHIVE' };
-      case 'images':
-        return { title: 'Image Captures', subtitle: 'EDGE STILL FRAMES & CLAHE ENHANCEMENTS' };
-      case 'ai':
-        return { title: 'AI Vision Analysis', subtitle: 'YOLOV8N QUANTIZED PIPELINE & INFERENCE BENCH' };
-      case 'device':
-        return { title: 'Device Console', subtitle: 'RPI4 / OV5647 / 850NM IR HARDWARE TELEMETRY' };
-      case 'settings':
-        return { title: 'System Configuration', subtitle: 'SENSOR, STORAGE & SECURITY PREFERENCES' };
-      default:
-        return { title: 'Dashboard', subtitle: '' };
-    }
-  };
-
-  const { title, subtitle } = getTabTitles();
 
   return (
-    <div className="app-shell">
-      {/* Subtle Live Animated Background */}
+    <div className="nocturpod-app-shell">
       <LiveBackground />
 
-      {/* Persistent Left Navigation Sidebar */}
+      {/* Primary Sidebar */}
       <Sidebar 
         activeTab={activeTab} 
-        onSelectTab={setActiveTab}
+        onSelectTab={setActiveTab} 
         isCollapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         deviceStatus={deviceStatus}
       />
 
-      {/* Main Content Workspace */}
-      <div className="workspace-container">
+      {/* Main Workspace */}
+      <div className={`main-workspace ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
         <TopBar 
-          title={title} 
-          subtitle={subtitle} 
-          deviceStatus={deviceStatus}
+          deviceStatus={deviceStatus} 
           onQuickCapture={handleQuickCapture}
+          activeTab={activeTab}
+          isRecording={isRecording}
+          onToggleRecording={handleToggleRecording}
         />
 
-        <main className="content-viewport">
+        {/* Global Toast */}
+        {toastNotification && (
+          <div className="app-toast-pill mono glass-panel">
+            <span className="toast-dot" />
+            <span className="toast-msg">{toastNotification}</span>
+          </div>
+        )}
+
+        {/* Workspace Content Router */}
+        <main className="content-viewport" id="main-content">
           {activeTab === 'overview' && (
             <OverviewScreen 
               deviceStatus={deviceStatus}
-              metrics={metrics}
-              events={events}
-              onSelectEvent={(evt) => {
-                if (evt.mediaType === 'VIDEO') {
-                  const clip = footage.find(f => f.videoUrl === evt.fullMediaUrl) || footage[0];
-                  setSelectedVideo(clip);
-                } else {
-                  const img = images.find(i => i.id === evt.id) || {
-                    id: evt.id,
-                    title: evt.label,
-                    url: evt.fullMediaUrl || evt.thumbnail,
-                    timestamp: evt.timestamp,
-                    aiTag: evt.label,
-                    confidence: evt.confidence,
-                    eventId: evt.id
-                  };
-                  setSelectedImage(img);
-                }
-              }}
+              capturesCount={images.length}
+              recordingsCount={footage.length}
               onNavigate={setActiveTab}
               onSnapshot={handleQuickCapture}
               isRecording={isRecording}
               onToggleRecording={handleToggleRecording}
-              claheActive={claheActive}
-              onToggleClahe={handleToggleClahe}
             />
           )}
 
@@ -257,9 +194,20 @@ export default function App() {
               onSnapshot={handleQuickCapture}
               isRecording={isRecording}
               onToggleRecording={handleToggleRecording}
-              claheActive={claheActive}
-              onToggleClahe={handleToggleClahe}
-              events={events}
+            />
+          )}
+
+          {activeTab === 'images' && (
+            <ImagesScreen 
+              images={images}
+              onSelectImage={setSelectedImage}
+            />
+          )}
+
+          {activeTab === 'footage' && (
+            <FootageScreen 
+              footageList={footage}
+              onSelectVideo={setSelectedVideo}
             />
           )}
 
@@ -267,97 +215,37 @@ export default function App() {
             <EventsScreen 
               events={events}
               onSelectEvent={(evt) => {
-                if (evt.mediaType === 'VIDEO') {
-                  const clip = footage.find(f => f.videoUrl === evt.fullMediaUrl) || footage[0];
-                  setSelectedVideo(clip);
+                if (evt.media_type === 'VIDEO') {
+                  setSelectedVideo(evt);
                 } else {
-                  const img = images.find(i => i.id === evt.id) || {
-                    id: evt.id,
-                    title: evt.label,
-                    url: evt.fullMediaUrl || evt.thumbnail,
-                    timestamp: evt.timestamp,
-                    aiTag: evt.label,
-                    confidence: evt.confidence,
-                    eventId: evt.id
-                  };
-                  setSelectedImage(img);
+                  setSelectedImage(evt);
                 }
               }}
-            />
-          )}
-
-          {activeTab === 'footage' && (
-            <FootageScreen 
-              footageList={footage}
-              onSelectVideo={(video) => setSelectedVideo(video)}
-            />
-          )}
-
-          {activeTab === 'images' && (
-            <ImagesScreen 
-              images={images}
-              onSelectImage={(img) => setSelectedImage(img)}
-            />
-          )}
-
-          {activeTab === 'ai' && (
-            <AIScreen 
-              aiSummary={aiSummary}
             />
           )}
 
           {activeTab === 'device' && (
             <DeviceScreen 
               deviceStatus={deviceStatus}
-              onRefreshTelemetry={async () => {
-                const refreshed = await fetchDeviceStatus();
-                if (refreshed) {
-                  setDeviceStatus(refreshed);
-                  showToast("Hardware registers updated from NocturPod edge node.");
-                }
-              }}
-            />
-          )}
-
-          {activeTab === 'settings' && (
-            <SettingsScreen 
-              deviceStatus={deviceStatus}
-              onSaveSettings={handleSaveSettings}
+              onRefreshTelemetry={refreshAllData}
             />
           )}
         </main>
       </div>
 
-      {/* Global Image Viewer Modal */}
+      {/* Modals for Original / Enhanced Viewing & Downloading */}
       {selectedImage && (
         <ImageViewerModal 
           image={selectedImage}
           onClose={() => setSelectedImage(null)}
-          onPrev={() => {
-            const idx = images.findIndex(i => i.id === selectedImage.id);
-            if (idx > 0) setSelectedImage(images[idx - 1]);
-          }}
-          onNext={() => {
-            const idx = images.findIndex(i => i.id === selectedImage.id);
-            if (idx < images.length - 1) setSelectedImage(images[idx + 1]);
-          }}
         />
       )}
 
-      {/* Global Video Player Modal */}
       {selectedVideo && (
         <VideoPlayerModal 
           video={selectedVideo}
           onClose={() => setSelectedVideo(null)}
         />
-      )}
-
-      {/* Floating System Toast */}
-      {toastNotification && (
-        <div className="floating-app-toast mono">
-          <span className="toast-bullet" />
-          <span>{toastNotification}</span>
-        </div>
       )}
     </div>
   );

@@ -1,71 +1,81 @@
 import React from 'react';
 import LivePlayer from '../components/LivePlayer';
 import MetricCard from '../components/MetricCard';
-import EventTimeline from '../components/EventTimeline';
 import StatusBadge from '../components/StatusBadge';
 import { 
-  Activity, 
   Camera, 
   Film, 
   Cpu, 
-  Clock, 
-  ShieldCheck, 
+  Thermometer, 
   HardDrive, 
-  Battery, 
   Wifi, 
   Sparkles,
-  ArrowRight
+  ArrowRight,
+  Clock
 } from 'lucide-react';
 import './OverviewScreen.css';
 
 export default function OverviewScreen({ 
   deviceStatus, 
-  metrics, 
-  events, 
-  onSelectEvent, 
+  capturesCount = 0,
+  recordingsCount = 0,
   onNavigate,
   onSnapshot,
   isRecording,
-  onToggleRecording,
-  claheActive,
-  onToggleClahe
+  onToggleRecording
 }) {
+  const isOnline = deviceStatus?.status === 'ONLINE' || deviceStatus?.status === 'RECORDING';
+  const camStatus = deviceStatus?.camera_status || deviceStatus?.cameraStatus || (isOnline ? 'ONLINE' : 'OFFLINE');
+  const resolution = deviceStatus?.stream_resolution || deviceStatus?.streamResolution || '1280x720';
+  const fps = deviceStatus?.stream_fps || deviceStatus?.streamFps || (isOnline ? 15 : 0);
+
+  const formatUptime = (seconds) => {
+    if (!seconds && seconds !== 0) return 'N/A';
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    return `${hrs}h ${mins}m`;
+  };
+
   return (
     <div className="overview-container">
       {/* Top Device Hardware Summary Strip */}
       <section className="node-hero-strip glass-panel">
         <div className="node-title-col">
           <div className="node-badge-row">
-            <span className="node-name">NOCTURPOD // α-1</span>
-            <StatusBadge status={deviceStatus?.status ?? 'ONLINE'} size="small" />
+            <span className="node-name">{deviceStatus?.device_name || deviceStatus?.name || 'NOCTURPOD // α-1'}</span>
+            <StatusBadge status={isOnline ? 'ONLINE' : 'OFFLINE'} size="small" />
           </div>
-          <span className="node-spec mono">RPI4-B (8GB) • OV5647 IR-CUT • 850nm DUAL MATRIX • 20,000mAh UNIT</span>
+          <span className="node-spec mono">
+            {deviceStatus?.hardware_model || 'Raspberry Pi 4 Model B 8GB'} • {deviceStatus?.camera_model || 'OV5647 IR-Cut'} • 850nm IR Illumination
+          </span>
         </div>
 
         <div className="node-status-grid">
           <div className="status-item">
             <span className="item-label mono">CAMERA</span>
-            <span className="item-val mono active">{deviceStatus?.cameraStatus ?? 'ONLINE'}</span>
+            <span className={`item-val mono ${camStatus === 'ONLINE' ? 'active' : ''}`}>{camStatus}</span>
           </div>
           <div className="status-item">
-            <span className="item-label mono">SPOOL BUFFER</span>
-            <span className="item-val mono active">ARMED (Nominal)</span>
+            <span className="item-label mono">CPU TEMP</span>
+            <span className="item-val mono">
+              {deviceStatus?.cpu_temp_c != null ? `${deviceStatus.cpu_temp_c}°C` : 'N/A'}
+            </span>
           </div>
           <div className="status-item">
             <span className="item-label mono">STORAGE</span>
-            <span className="item-val mono">{deviceStatus?.storageUsedGB ?? 18.4} / 64 GB</span>
-          </div>
-          <div className="status-item">
-            <span className="item-label mono">POWER BANK</span>
-            <span className="item-val mono">{deviceStatus?.batteryPercent ?? 88}% ({deviceStatus?.batteryVoltage ?? '11.8V'})</span>
+            <span className="item-val mono">
+              {deviceStatus?.storage_used_gb != null ? `${deviceStatus.storage_used_gb} GB` : 'N/A'}
+            </span>
           </div>
           <div className="status-item">
             <span className="item-label mono">NETWORK</span>
-            <span className="item-val mono active">{deviceStatus?.wifiStatus ?? 'CONNECTED'} (-58 dBm)</span>
+            <span className={`item-val mono ${deviceStatus?.wifi_status === 'CONNECTED' ? 'active' : ''}`}>
+              {deviceStatus?.wifi_status || 'DISCONNECTED'}
+            </span>
           </div>
           <div className="status-item">
-            <span className="item-label mono">AI PIPELINE</span>
-            <span className="item-val mono active">NCNN INT8 ACTIVE</span>
+            <span className="item-label mono">UPTIME</span>
+            <span className="item-val mono">{formatUptime(deviceStatus?.uptime_seconds)}</span>
           </div>
         </div>
       </section>
@@ -75,8 +85,8 @@ export default function OverviewScreen({
         <div className="overview-left-col">
           <div className="feed-card-header">
             <div className="feed-title-wrap">
-              <span className="feed-title">PRIMARY LIVE SURVEILLANCE FEED</span>
-              <span className="feed-meta mono">SECTOR ALPHA (ENTRYWAY)</span>
+              <span className="feed-title">REAL CAMERA FEED</span>
+              <span className="feed-meta mono">{resolution} • {fps} FPS</span>
             </div>
             <button 
               className="expand-monitor-btn mono"
@@ -91,76 +101,41 @@ export default function OverviewScreen({
             onSnapshot={onSnapshot}
             isRecording={isRecording}
             onToggleRecording={onToggleRecording}
-            claheActive={claheActive}
-            onToggleClahe={onToggleClahe}
-            irNightMode={deviceStatus?.irNightMode ?? 'AUTO_ACTIVE'}
-            streamResolution={deviceStatus?.streamResolution ?? '1920×1080'}
-            cameraStatus={deviceStatus?.cameraStatus ?? 'ONLINE'}
+            cameraStatus={camStatus}
+            streamResolution={resolution}
+            streamFps={fps}
           />
-
-          {/* Under-feed compact metric blocks */}
-          <div className="metrics-grid">
-            <MetricCard 
-              label="MOTION EVENTS TODAY" 
-              value={metrics?.motionEventsToday ?? 19} 
-              subtext="Edge vision triggers"
-              icon={Activity}
-              trend="+3 in last hour"
-            />
-            <MetricCard 
-              label="CAPTURES TODAY" 
-              value={metrics?.capturesToday ?? 42} 
-              subtext="Full resolution frames"
-              icon={Camera}
-              trend="100% written"
-            />
-            <MetricCard 
-              label="RECORDED MINUTES" 
-              value={`${metrics?.recordedMinutesToday ?? 68}m`} 
-              subtext="1080p H.264 footage"
-              icon={Film}
-              trend="38.4 GB free"
-            />
-            <MetricCard 
-              label="AI DETECTIONS" 
-              value={metrics?.aiDetectionsToday ?? 31} 
-              subtext="YOLOv8 Edge inference"
-              icon={Cpu}
-              trend="38ms avg"
-            />
-            <MetricCard 
-              label="DEVICE UPTIME" 
-              value={metrics?.uptimeStr ?? "2d 06h"} 
-              subtext="Thermal 44.8°C (Nominal)"
-              icon={Clock}
-              trend="99.4% stability"
-            />
-          </div>
         </div>
 
-        {/* Right side Live Event Timeline */}
+        {/* Right side operational metrics */}
         <div className="overview-right-col">
-          <div className="timeline-panel glass-panel">
-            <div className="timeline-header">
-              <div className="th-title-group">
-                <span className="th-title">LIVE EVENT TIMELINE</span>
-                <span className="th-sub mono">RECENT SENSOR & AI TRIGGERS</span>
-              </div>
-              <button 
-                className="view-all-events-btn mono"
-                onClick={() => onNavigate('events')}
-              >
-                VIEW ALL
-              </button>
-            </div>
-
-            <div className="timeline-scroll-body">
-              <EventTimeline 
-                events={events} 
-                onSelectEvent={onSelectEvent} 
-                maxItems={5} 
-              />
-            </div>
+          <div className="metrics-column">
+            <MetricCard 
+              label="TOTAL CAPTURES"
+              value={capturesCount}
+              subtext="Original + AI Enhanced Stills"
+              icon={Camera}
+              trend="ACTIVE"
+            />
+            <MetricCard 
+              label="TOTAL RECORDINGS"
+              value={recordingsCount}
+              subtext="Original + AI Enhanced Clips"
+              icon={Film}
+              trend="ACTIVE"
+            />
+            <MetricCard 
+              label="CPU UTILIZATION"
+              value={deviceStatus?.cpu_usage_percent != null ? `${deviceStatus.cpu_usage_percent}%` : 'N/A'}
+              subtext="Broadcom BCM2711 ARM64"
+              icon={Cpu}
+            />
+            <MetricCard 
+              label="RAM USAGE"
+              value={deviceStatus?.ram_usage_percent != null ? `${deviceStatus.ram_usage_percent}%` : 'N/A'}
+              subtext="System Memory Active"
+              icon={HardDrive}
+            />
           </div>
         </div>
       </div>

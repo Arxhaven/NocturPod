@@ -4,13 +4,9 @@ import {
   HardDrive, 
   Cpu, 
   Camera, 
-  ShieldCheck, 
-  Battery, 
   Wifi, 
   Thermometer, 
-  Activity, 
   Clock, 
-  Zap, 
   RefreshCw,
   Server,
   Layers
@@ -18,17 +14,27 @@ import {
 import './DeviceScreen.css';
 
 export default function DeviceScreen({ deviceStatus, onRefreshTelemetry }) {
+  const isOnline = deviceStatus?.status === 'ONLINE' || deviceStatus?.status === 'RECORDING';
+  const camStatus = deviceStatus?.camera_status || deviceStatus?.cameraStatus || (isOnline ? 'ONLINE' : 'OFFLINE');
+
+  const formatUptime = (seconds) => {
+    if (!seconds && seconds !== 0) return 'N/A';
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    return `${hrs}h ${mins}m`;
+  };
+
   return (
     <div className="device-screen-container">
       {/* Top Console Summary Header */}
       <div className="device-summary-strip glass-panel">
         <div className="dev-strip-head">
           <div className="dev-title-row">
-            <span className="dev-title">EMBEDDED EDGE HARDWARE HEALTH</span>
-            <StatusBadge status={deviceStatus?.status ?? 'ONLINE'} />
+            <span className="dev-title">EMBEDDED HARDWARE TELEMETRY</span>
+            <StatusBadge status={isOnline ? 'ONLINE' : 'OFFLINE'} />
           </div>
           <span className="dev-meta mono">
-            NODE IDENTIFIER: {deviceStatus?.id ?? 'nocturpod-edge-01'} • ARCH: ARM64 CORTEX-A72
+            NODE IDENTIFIER: {deviceStatus?.device_id || deviceStatus?.id || 'nocturpod-edge-01'} • MODEL: {deviceStatus?.hardware_model || deviceStatus?.hardware || 'Raspberry Pi 4 Model B 8GB'}
           </span>
         </div>
 
@@ -36,7 +42,7 @@ export default function DeviceScreen({ deviceStatus, onRefreshTelemetry }) {
           <button 
             className="dev-action-btn mono"
             onClick={onRefreshTelemetry}
-            title="Poll hardware registers"
+            title="Refresh hardware status from backend"
           >
             <RefreshCw size={13} />
             <span>PING NODE</span>
@@ -53,33 +59,39 @@ export default function DeviceScreen({ deviceStatus, onRefreshTelemetry }) {
               <Cpu size={16} className="sub-icon" />
               <span className="sub-title">COMPUTE SYSTEM</span>
             </div>
-            <StatusBadge status="ONLINE" size="small" />
+            <StatusBadge status={isOnline ? 'ONLINE' : 'OFFLINE'} size="small" />
           </div>
 
           <div className="sub-body mono">
             <div className="sub-row">
               <span className="s-label">SOC HARDWARE:</span>
-              <span className="s-val">Raspberry Pi 4 Model B</span>
+              <span className="s-val">{deviceStatus?.hardware_model || deviceStatus?.hardware || 'Raspberry Pi 4 Model B 8GB'}</span>
             </div>
             <div className="sub-row">
               <span className="s-label">CPU TEMPERATURE:</span>
-              <span className="s-val active">{deviceStatus?.cpuTempC ?? 44.8}°C (Nominal)</span>
+              <span className={`s-val ${deviceStatus?.cpu_temp_c != null ? 'active' : ''}`}>
+                {deviceStatus?.cpu_temp_c != null ? `${deviceStatus.cpu_temp_c}°C` : 'N/A'}
+              </span>
             </div>
             <div className="sub-row">
               <span className="s-label">CPU UTILIZATION:</span>
-              <span className="s-val">{deviceStatus?.cpuUsagePercent ?? 28}%</span>
+              <span className="s-val">
+                {deviceStatus?.cpu_usage_percent != null ? `${deviceStatus.cpu_usage_percent}%` : 'N/A'}
+              </span>
             </div>
             <div className="sub-row">
               <span className="s-label">RAM USAGE:</span>
-              <span className="s-val">{deviceStatus?.ramUsagePercent ?? 41}% (1.64 / 4 GB)</span>
+              <span className="s-val">
+                {deviceStatus?.ram_usage_percent != null ? `${deviceStatus.ram_usage_percent}%` : 'N/A'}
+              </span>
             </div>
             <div className="sub-row">
               <span className="s-label">SYSTEM UPTIME:</span>
-              <span className="s-val">{deviceStatus?.uptimeHours ?? 54}h {deviceStatus?.uptimeMinutes ?? 22}m</span>
+              <span className="s-val">{formatUptime(deviceStatus?.uptime_seconds)}</span>
             </div>
             <div className="sub-row">
-              <span className="s-label">LAST HEARTBEAT:</span>
-              <span className="s-val">{deviceStatus?.lastHeartbeatSec ?? 2}s ago</span>
+              <span className="s-label">IP ADDRESS:</span>
+              <span className="s-val">{deviceStatus?.ip_address || 'N/A'}</span>
             </div>
           </div>
         </div>
@@ -89,111 +101,102 @@ export default function DeviceScreen({ deviceStatus, onRefreshTelemetry }) {
           <div className="sub-header">
             <div className="sub-title-wrap">
               <Camera size={16} className="sub-icon" />
-              <span className="sub-title">IMAGING SENSOR & IR</span>
+              <span className="sub-title">IMAGING SENSOR</span>
             </div>
-            <StatusBadge status={deviceStatus?.cameraStatus ?? 'ONLINE'} size="small" />
+            <StatusBadge status={camStatus} size="small" />
           </div>
 
           <div className="sub-body mono">
             <div className="sub-row">
-              <span className="s-label">OPTICAL SENSOR:</span>
-              <span className="s-val">OmniVision OV5647 5MP</span>
+              <span className="s-label">CAMERA SENSOR:</span>
+              <span className="s-val">{deviceStatus?.camera_model || deviceStatus?.cameraModel || 'OV5647 IR-Cut'}</span>
             </div>
             <div className="sub-row">
-              <span className="s-label">IR-CUT FILTER:</span>
-              <span className="s-val active">MECHANICAL TOGGLE READY</span>
-            </div>
-            <div className="sub-row">
-              <span className="s-label">850nm IR MATRIX:</span>
-              <span className="s-val active">ACTIVE (Dual Array)</span>
+              <span className="s-label">IR ILLUMINATION:</span>
+              <span className="s-val active">850nm IR Illumination</span>
             </div>
             <div className="sub-row">
               <span className="s-label">STREAM RESOLUTION:</span>
-              <span className="s-val">{deviceStatus?.streamResolution ?? '1920×1080'}</span>
+              <span className="s-val">{deviceStatus?.stream_resolution || deviceStatus?.streamResolution || '1280x720'}</span>
             </div>
             <div className="sub-row">
-              <span className="s-label">TARGET FPS:</span>
-              <span className="s-val">{deviceStatus?.streamFps ?? 24} FPS Constant</span>
+              <span className="s-label">STREAM FPS:</span>
+              <span className="s-val">{deviceStatus?.stream_fps || deviceStatus?.streamFps || (isOnline ? 15 : 0)} FPS</span>
             </div>
             <div className="sub-row">
-              <span className="s-label">ENCODER:</span>
-              <span className="s-val">V4L2 Hardware H.264</span>
+              <span className="s-label">CAMERA STATUS:</span>
+              <span className={`s-val ${camStatus === 'ONLINE' ? 'active' : ''}`}>{camStatus}</span>
             </div>
           </div>
         </div>
 
-        {/* Edge Buffer & Spool Subsystem Card */}
+        {/* Network Subsystem Card */}
         <div className="subsystem-card glass-panel">
           <div className="sub-header">
             <div className="sub-title-wrap">
-              <ShieldCheck size={16} className="sub-icon" />
-              <span className="sub-title">LOCAL BUFFER & SPOOL QUEUE</span>
+              <Wifi size={16} className="sub-icon" />
+              <span className="sub-title">NETWORK CONNECTIVITY</span>
             </div>
-            <StatusBadge status="ONLINE" size="small" />
+            <StatusBadge status={deviceStatus?.wifi_status === 'CONNECTED' ? 'ONLINE' : 'OFFLINE'} size="small" />
           </div>
 
           <div className="sub-body mono">
             <div className="sub-row">
-              <span className="s-label">BUFFER CAPACITY:</span>
-              <span className="s-val">500 MB Bounded FIFO</span>
+              <span className="s-label">WI-FI STATUS:</span>
+              <span className={`s-val ${deviceStatus?.wifi_status === 'CONNECTED' ? 'active' : ''}`}>
+                {deviceStatus?.wifi_status || 'DISCONNECTED'}
+              </span>
             </div>
             <div className="sub-row">
-              <span className="s-label">SPOOL DIRECTORY:</span>
-              <span className="s-val active">storage/edge_spool/</span>
+              <span className="s-label">SSID:</span>
+              <span className="s-val">{deviceStatus?.wifi_ssid || 'N/A'}</span>
             </div>
             <div className="sub-row">
-              <span className="s-label">NETWORK RESILIENCE:</span>
-              <span className="s-val">Partition-Tolerant Auto Retry</span>
+              <span className="s-label">SIGNAL (RSSI):</span>
+              <span className="s-val">
+                {deviceStatus?.wifi_rssi != null ? `${deviceStatus.wifi_rssi} dBm` : 'N/A'}
+              </span>
             </div>
             <div className="sub-row">
-              <span className="s-label">DAEMON PROCESS:</span>
-              <span className="s-val">nocturpod-agent.service (systemd)</span>
-            </div>
-            <div className="sub-row">
-              <span className="s-label">PERSISTENCE:</span>
-              <span className="s-val">SQLite 3 WAL Relational Store</span>
-            </div>
-            <div className="sub-row">
-              <span className="s-label">AUTH CREDENTIAL:</span>
-              <span className="s-val">X-Device-Token Authenticated</span>
+              <span className="s-label">BACKEND LINK:</span>
+              <span className="s-val active">HTTPS / PostgREST</span>
             </div>
           </div>
         </div>
 
-        {/* Power Bank & Storage Card */}
+        {/* Storage & Service Card */}
         <div className="subsystem-card glass-panel">
           <div className="sub-header">
             <div className="sub-title-wrap">
-              <Battery size={16} className="sub-icon" />
-              <span className="sub-title">POWER & PERSISTENCE</span>
+              <HardDrive size={16} className="sub-icon" />
+              <span className="sub-title">PERSISTENCE & AGENT</span>
             </div>
             <StatusBadge status="READY" size="small" />
           </div>
 
           <div className="sub-body mono">
             <div className="sub-row">
-              <span className="s-label">BATTERY UNIT:</span>
-              <span className="s-val">20,000mAh PD3.0 Rugged Pack</span>
-            </div>
-            <div className="sub-row">
-              <span className="s-label">REMAINING CHARGE:</span>
-              <span className="s-val active">{deviceStatus?.batteryPercent ?? 88}% ({deviceStatus?.batteryVoltage ?? '11.8V'})</span>
-            </div>
-            <div className="sub-row">
-              <span className="s-label">EST. RUNTIME:</span>
-              <span className="s-val">~18.4 Hours continuous</span>
-            </div>
-            <div className="sub-row">
               <span className="s-label">STORAGE USED:</span>
-              <span className="s-val">{deviceStatus?.storageUsedGB ?? 18.4} / {deviceStatus?.storageTotalGB ?? 64.0} GB</span>
+              <span className="s-val">
+                {deviceStatus?.storage_used_gb != null ? `${deviceStatus.storage_used_gb} GB` : 'N/A'}
+                {deviceStatus?.storage_total_gb != null ? ` / ${deviceStatus.storage_total_gb} GB` : ''}
+              </span>
             </div>
             <div className="sub-row">
-              <span className="s-label">DATABASE FILE:</span>
-              <span className="s-val">storage/detections.sqlite</span>
+              <span className="s-label">LOCAL MEDIA SPOOL:</span>
+              <span className="s-val active">~/nocturpod/media/</span>
             </div>
             <div className="sub-row">
-              <span className="s-label">SSD INTEGRITY:</span>
-              <span className="s-val active">SMART OK (100% Health)</span>
+              <span className="s-label">SERVICE DAEMON:</span>
+              <span className="s-val">nocturpod-agent.service (systemd)</span>
+            </div>
+            <div className="sub-row">
+              <span className="s-label">SOFTWARE VERSION:</span>
+              <span className="s-val">{deviceStatus?.software_version || '1.0.0'}</span>
+            </div>
+            <div className="sub-row">
+              <span className="s-label">AI PIPELINE:</span>
+              <span className="s-val">{deviceStatus?.ai_model_version || 'Adaptive CLAHE + YOLOv8n'}</span>
             </div>
           </div>
         </div>

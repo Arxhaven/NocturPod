@@ -1,69 +1,34 @@
 import React, { useState } from 'react';
 import { 
   Search, 
-  Filter, 
-  ZoomIn, 
-  Camera, 
   Sparkles, 
-  Crosshair,
-  SlidersHorizontal,
-  Grid,
-  Maximize2
+  Maximize2,
+  Image as ImageIcon,
+  Clock,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import './ImagesScreen.css';
 
-export default function ImagesScreen({ images, onSelectImage }) {
-  const [filterTag, setFilterTag] = useState('ALL');
+export default function ImagesScreen({ images = [], onSelectImage }) {
   const [searchQuery, setSearchQuery] = useState('');
 
   const filtered = images.filter((img) => {
-    if (filterTag !== 'ALL' && img.aiTag !== filterTag) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      return (
-        img.title.toLowerCase().includes(q) ||
-        img.timestamp.toLowerCase().includes(q) ||
-        (img.eventId && img.eventId.toLowerCase().includes(q))
-      );
+      const eventId = (img.event_id || img.id || '').toLowerCase();
+      const notes = (img.notes || '').toLowerCase();
+      return eventId.includes(q) || notes.includes(q);
     }
     return true;
   });
 
   return (
     <div className="images-screen-container">
-      {/* Top Filter and Search Bar */}
+      {/* Top Search Bar */}
       <div className="images-filter-bar glass-panel">
         <div className="img-chips">
-          <button 
-            className={`img-chip mono ${filterTag === 'ALL' ? 'active' : ''}`}
-            onClick={() => setFilterTag('ALL')}
-          >
-            ALL CAPTURES ({images.length})
-          </button>
-          <button 
-            className={`img-chip mono ${filterTag === 'Person' ? 'active' : ''}`}
-            onClick={() => setFilterTag('Person')}
-          >
-            PERSON
-          </button>
-          <button 
-            className={`img-chip mono ${filterTag === 'Vehicle' ? 'active' : ''}`}
-            onClick={() => setFilterTag('Vehicle')}
-          >
-            VEHICLE
-          </button>
-          <button 
-            className={`img-chip mono ${filterTag === 'Bicycle' ? 'active' : ''}`}
-            onClick={() => setFilterTag('Bicycle')}
-          >
-            BICYCLE
-          </button>
-          <button 
-            className={`img-chip mono ${filterTag === 'Animal' ? 'active' : ''}`}
-            onClick={() => setFilterTag('Animal')}
-          >
-            LOW-CONFIDENCE
-          </button>
+          <span className="chips-title mono">TOTAL CAPTURES: {images.length}</span>
         </div>
 
         <div className="search-wrap">
@@ -71,7 +36,7 @@ export default function ImagesScreen({ images, onSelectImage }) {
           <input 
             type="text" 
             className="search-input mono"
-            placeholder="Search captures by ID, time, title..."
+            placeholder="Search captures by Event ID..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -79,57 +44,74 @@ export default function ImagesScreen({ images, onSelectImage }) {
       </div>
 
       {/* Grid of captures */}
-      <div className="images-masonry-grid">
-        {filtered.map((item) => (
-          <div 
-            key={item.id} 
-            className="image-card glass-panel"
-            onClick={() => onSelectImage(item)}
-            role="button"
-            tabIndex={0}
-          >
-            <div className="img-preview-box">
-              <img src={item.thumbnail} alt={item.title} loading="lazy" />
+      {filtered.length === 0 ? (
+        <div className="empty-state-panel glass-panel">
+          <ImageIcon size={40} className="empty-icon" />
+          <h3 className="empty-title">NO CAPTURES YET</h3>
+          <p className="empty-sub mono">
+            Trigger a manual capture from the Live Monitor to generate original and AI enhanced media.
+          </p>
+        </div>
+      ) : (
+        <div className="images-masonry-grid">
+          {filtered.map((item) => {
+            const isEnhanced = item.processing_status === 'COMPLETE' && item.enhanced_url;
+            const isProcessing = item.processing_status === 'PROCESSING' || item.processing_status === 'PENDING';
+            const displayUrl = isEnhanced ? item.enhanced_url : (item.original_url || item.thumbnail);
 
-              <div className="img-hover-actions">
-                <span className="expand-pill mono">
-                  <Maximize2 size={13} />
-                  <span>INSPECT FULL RES</span>
-                </span>
+            return (
+              <div 
+                key={item.event_id || item.id} 
+                className="image-card glass-panel"
+                onClick={() => onSelectImage(item)}
+                role="button"
+                tabIndex={0}
+              >
+                <div className="img-preview-box">
+                  {displayUrl ? (
+                    <img src={displayUrl} alt={item.event_id || 'Capture'} loading="lazy" />
+                  ) : (
+                    <div className="placeholder-preview mono">
+                      <Clock size={24} />
+                      <span>PROCESSING</span>
+                    </div>
+                  )}
+
+                  <div className="img-hover-actions">
+                    <span className="expand-pill mono">
+                      <Maximize2 size={13} />
+                      <span>INSPECT ORIGINAL & ENHANCED</span>
+                    </span>
+                  </div>
+
+                  <div className="img-overlay-top">
+                    {isEnhanced ? (
+                      <span className="ai-status-pill complete mono">
+                        <CheckCircle2 size={11} />
+                        <span>ENHANCED</span>
+                      </span>
+                    ) : isProcessing ? (
+                      <span className="ai-status-pill processing mono">
+                        <Clock size={11} />
+                        <span>ENHANCING...</span>
+                      </span>
+                    ) : (
+                      <span className="ai-status-pill original mono">
+                        <span>ORIGINAL</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="img-meta-footer">
+                  <span className="img-event-id mono">{item.event_id || item.id}</span>
+                  <span className="img-time mono">{item.timestamp ? new Date(item.timestamp).toLocaleTimeString() : 'Recent'}</span>
+                </div>
               </div>
-
-              {item.claheApplied && (
-                <span className="clahe-applied-badge mono" title="CLAHE low-light enhancement active">
-                  CLAHE
-                </span>
-              )}
-
-              {item.boundingBoxes && item.boundingBoxes.length > 0 && (
-                <span className="bbox-detected-badge mono">
-                  {item.boundingBoxes.length} TARGET
-                </span>
-              )}
-            </div>
-
-            <div className="img-card-details">
-              <div className="img-card-top-row">
-                <span className="img-card-title">{item.title}</span>
-                <span className="img-card-tag mono">{item.aiTag}</span>
-              </div>
-
-              <div className="img-card-meta-row mono">
-                <span>{item.timestamp}</span>
-                <span>{item.confidence ? (item.confidence * 100).toFixed(1) + '%' : 'N/A'}</span>
-              </div>
-
-              <div className="img-card-exp-row mono">
-                <span>{item.resolution}</span>
-                <span>{item.iso}</span>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

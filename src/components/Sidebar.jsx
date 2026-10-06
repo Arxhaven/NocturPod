@@ -5,10 +5,7 @@ import {
   Activity, 
   Film, 
   Image as ImageIcon, 
-  Cpu, 
   HardDrive, 
-  Settings as SettingsIcon,
-  Radio,
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
@@ -17,15 +14,15 @@ import './Sidebar.css';
 const NAV_ITEMS = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
   { id: 'live', label: 'Live Monitor', icon: Video, badge: 'LIVE' },
+  { id: 'images', label: 'Captures', icon: ImageIcon },
+  { id: 'footage', label: 'Recordings', icon: Film },
   { id: 'events', label: 'Events', icon: Activity },
-  { id: 'footage', label: 'Footage', icon: Film },
-  { id: 'images', label: 'Images', icon: ImageIcon },
-  { id: 'ai', label: 'AI Analysis', icon: Cpu },
   { id: 'device', label: 'Device', icon: HardDrive },
-  { id: 'settings', label: 'Settings', icon: SettingsIcon },
 ];
 
 export default function Sidebar({ activeTab, onSelectTab, isCollapsed, onToggleCollapse, deviceStatus }) {
+  const isOnline = deviceStatus?.status === 'ONLINE' || deviceStatus?.status === 'RECORDING';
+
   return (
     <aside className={`sidebar-container ${isCollapsed ? 'collapsed' : ''}`}>
       {/* Brand Header */}
@@ -45,13 +42,15 @@ export default function Sidebar({ activeTab, onSelectTab, isCollapsed, onToggleC
       {/* Heartbeat Status Indicator */}
       <div className="sidebar-heartbeat">
         <div className="heartbeat-indicator">
-          <span className="heartbeat-pulse" />
-          <span className="heartbeat-dot" />
+          <span className={`heartbeat-pulse ${isOnline ? 'online' : 'offline'}`} />
+          <span className={`heartbeat-dot ${isOnline ? 'online' : 'offline'}`} />
         </div>
         {!isCollapsed && (
           <div className="heartbeat-meta">
             <span className="heartbeat-label">EDGE HEARTBEAT</span>
-            <span className="heartbeat-val mono">{deviceStatus?.lastHeartbeatSec ?? 2}s ago</span>
+            <span className="heartbeat-val mono">
+              {isOnline ? 'ONLINE' : 'OFFLINE'}
+            </span>
           </div>
         )}
       </div>
@@ -64,47 +63,40 @@ export default function Sidebar({ activeTab, onSelectTab, isCollapsed, onToggleC
           return (
             <button
               key={item.id}
-              className={`nav-item ${isActive ? 'active' : ''}`}
+              className={`nav-item-btn ${isActive ? 'active' : ''}`}
               onClick={() => onSelectTab(item.id)}
               title={isCollapsed ? item.label : undefined}
             >
               <span className="nav-icon-wrap">
-                <Icon size={18} strokeWidth={isActive ? 2.2 : 1.7} />
+                <Icon size={18} />
               </span>
-              {!isCollapsed && <span className="nav-label">{item.label}</span>}
-              {!isCollapsed && item.badge && (
-                <span className="nav-badge mono">{item.badge}</span>
+              {!isCollapsed && (
+                <>
+                  <span className="nav-label">{item.label}</span>
+                  {item.badge && (
+                    <span className={`nav-badge ${isOnline ? 'badge-pulse' : 'badge-idle'}`}>
+                      {item.badge}
+                    </span>
+                  )}
+                </>
               )}
-              {isActive && <div className="active-indicator" />}
             </button>
           );
         })}
       </nav>
 
-      {/* Edge System Summary in footer */}
-      {!isCollapsed && (
-        <div className="sidebar-footer">
-          <div className="edge-chip mono">
-            <div className="chip-row">
-              <span className="chip-label">NODE:</span>
-              <span className="chip-val">RPI4-OV5647</span>
-            </div>
-            <div className="chip-row">
-              <span className="chip-label">AI:</span>
-              <span className="chip-val">YOLOv8n / NCNN</span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Toggle button */}
-      <button 
-        className="collapse-toggle-btn"
-        onClick={onToggleCollapse}
-        aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-      >
-        {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-      </button>
+      {/* Bottom Collapse Toggle */}
+      <div className="sidebar-footer">
+        <button
+          className="collapse-toggle-btn"
+          onClick={onToggleCollapse}
+          title={isCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+          aria-label={isCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+        >
+          {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+          {!isCollapsed && <span className="collapse-text mono">COLLAPSE</span>}
+        </button>
+      </div>
     </aside>
   );
 }

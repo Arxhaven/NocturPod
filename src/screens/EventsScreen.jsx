@@ -1,18 +1,15 @@
 import React, { useState } from 'react';
 import EventTimeline from '../components/EventTimeline';
 import { 
-  Filter, 
   Search, 
-  Calendar, 
   Activity, 
-  ShieldAlert, 
+  Sparkles,
   Camera, 
-  Film,
-  Download
+  Film
 } from 'lucide-react';
 import './EventsScreen.css';
 
-export default function EventsScreen({ events, onSelectEvent }) {
+export default function EventsScreen({ events = [], onSelectEvent }) {
   const [filterType, setFilterType] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -22,11 +19,9 @@ export default function EventsScreen({ events, onSelectEvent }) {
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      return (
-        evt.label.toLowerCase().includes(q) ||
-        evt.type.toLowerCase().includes(q) ||
-        evt.timestamp.toLowerCase().includes(q)
-      );
+      const eventId = (evt.event_id || evt.id || '').toLowerCase();
+      const notes = (evt.notes || '').toLowerCase();
+      return eventId.includes(q) || notes.includes(q);
     }
     return true;
   });
@@ -43,22 +38,16 @@ export default function EventsScreen({ events, onSelectEvent }) {
             ALL EVENTS ({events.length})
           </button>
           <button 
-            className={`filter-chip mono ${filterType === 'MOTION_TRIGGERED' ? 'active' : ''}`}
-            onClick={() => setFilterType('MOTION_TRIGGERED')}
+            className={`filter-chip mono ${filterType === 'MANUAL_CAPTURE' ? 'active' : ''}`}
+            onClick={() => setFilterType('MANUAL_CAPTURE')}
           >
-            MOTION DETECTED
+            CAPTURES
           </button>
           <button 
-            className={`filter-chip mono ${filterType === 'FOOTAGE_RECORDED' ? 'active' : ''}`}
-            onClick={() => setFilterType('FOOTAGE_RECORDED')}
+            className={`filter-chip mono ${filterType === 'VIDEO_RECORDING' ? 'active' : ''}`}
+            onClick={() => setFilterType('VIDEO_RECORDING')}
           >
             RECORDINGS
-          </button>
-          <button 
-            className={`filter-chip mono ${filterType === 'UNIDENTIFIED_TARGET' ? 'active' : ''}`}
-            onClick={() => setFilterType('UNIDENTIFIED_TARGET')}
-          >
-            LOW CONFIDENCE / AMBIGUOUS
           </button>
         </div>
 
@@ -67,7 +56,7 @@ export default function EventsScreen({ events, onSelectEvent }) {
           <input 
             type="text"
             className="search-input mono"
-            placeholder="Search event label, timestamp..."
+            placeholder="Search events by ID..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -77,16 +66,24 @@ export default function EventsScreen({ events, onSelectEvent }) {
       {/* Main Timeline Stream */}
       <div className="events-timeline-card glass-panel">
         <div className="card-top-head">
-          <span className="card-title">CHRONOLOGICAL SENSOR AUDIT TIMELINE</span>
-          <span className="card-count mono">{filteredEvents.length} MATCHING EVENTS</span>
+          <span className="card-title">REAL HARDWARE EVENT LOG</span>
+          <span className="card-count mono">{filteredEvents.length} RECORDED</span>
         </div>
 
-        <div className="timeline-wrap">
-          <EventTimeline 
-            events={filteredEvents} 
-            onSelectEvent={onSelectEvent} 
-          />
-        </div>
+        {filteredEvents.length === 0 ? (
+          <div className="empty-state-panel">
+            <Activity size={36} className="empty-icon" />
+            <h3 className="empty-title">NO EVENTS RECORDED</h3>
+            <p className="empty-sub mono">Operational events created by captures and recordings will appear here.</p>
+          </div>
+        ) : (
+          <div className="timeline-wrap">
+            <EventTimeline 
+              events={filteredEvents} 
+              onSelectEvent={onSelectEvent} 
+            />
+          </div>
+        )}
       </div>
     </div>
   );
