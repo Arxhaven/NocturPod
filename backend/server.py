@@ -88,6 +88,25 @@ def verify_device_auth() -> bool:
 # --------------------------------------------------------------------------
 # Health & Status Endpoints
 # --------------------------------------------------------------------------
+@app.get("/")
+def root_index():
+    return jsonify({
+        "service": "NocturPod Production Backend API",
+        "status": "ONLINE",
+        "endpoints": {
+            "health": "/health",
+            "device_health": "/api/device/health",
+            "device_status": "/api/device/status",
+            "events": "/api/events",
+            "images": "/api/media/images",
+            "footage": "/api/media/footage",
+            "stream_live": "/api/stream/live",
+            "stream_status": "/api/stream/status",
+            "ai_status": "/api/ai/status"
+        }
+    })
+
+
 @app.get("/health")
 def root_health():
     return jsonify({
