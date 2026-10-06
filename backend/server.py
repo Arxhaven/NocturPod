@@ -96,6 +96,15 @@ def root_health():
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
     })
 
+@app.get("/api/debug/routes")
+def debug_routes():
+    return jsonify({
+        "routes": [
+            str(rule)
+            for rule in app.url_map.iter_rules()
+        ]
+    })
+
 
 @app.get("/api/device/health")
 def device_health():
