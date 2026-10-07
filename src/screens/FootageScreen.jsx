@@ -4,9 +4,7 @@ import {
   Film, 
   Search, 
   Clock, 
-  Sparkles,
-  CheckCircle2,
-  AlertCircle
+  CheckCircle2
 } from 'lucide-react';
 import './FootageScreen.css';
 
@@ -28,7 +26,7 @@ export default function FootageScreen({ footageList = [], onSelectVideo }) {
       {/* Top Search Bar */}
       <div className="footage-filter-bar glass-panel">
         <div className="filter-chips">
-          <span className="chips-title mono">TOTAL RECORDINGS: {footageList.length}</span>
+          <span className="chips-title mono">GENUINE RECORDINGS: {footageList.length}</span>
         </div>
 
         <div className="search-wrap">
@@ -49,7 +47,7 @@ export default function FootageScreen({ footageList = [], onSelectVideo }) {
           <Film size={40} className="empty-icon" />
           <h3 className="empty-title">NO RECORDINGS YET</h3>
           <p className="empty-sub mono">
-            Use 'Start Recording' and 'Stop Recording' in the Live Monitor to capture video clips.
+            Use 'Start Recording' and 'Stop Recording' in the Live Monitor to capture genuine OV5647 video clips.
           </p>
         </div>
       ) : (
@@ -75,13 +73,13 @@ export default function FootageScreen({ footageList = [], onSelectVideo }) {
                       <Play size={18} fill="currentColor" />
                     </div>
                   </div>
-                  <span className="duration-tag mono">{clip.duration || 'Video'}</span>
+                  {clip.duration && <span className="duration-tag mono">{clip.duration}</span>}
 
                   <div className="footage-overlay-top">
                     {isEnhanced ? (
                       <span className="ai-status-pill complete mono">
                         <CheckCircle2 size={11} />
-                        <span>ENHANCED</span>
+                        <span>AI ENHANCED</span>
                       </span>
                     ) : isProcessing ? (
                       <span className="ai-status-pill processing mono">
@@ -102,7 +100,7 @@ export default function FootageScreen({ footageList = [], onSelectVideo }) {
                   </div>
 
                   <div className="footage-meta-row mono">
-                    <span>{clip.timestamp ? new Date(clip.timestamp).toLocaleDateString() : 'Recent'}</span>
+                    <span>{clip.timestamp ? new Date(clip.timestamp).toLocaleDateString() : 'N/A'}</span>
                     <span className="dot-divider">•</span>
                     <span className="active-tag">{isEnhanced ? 'ORIGINAL + ENHANCED' : 'ORIGINAL'}</span>
                   </div>

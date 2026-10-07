@@ -1,19 +1,17 @@
 /**
- * NocturPod Empty Production Fallbacks
- * Used ONLY when backend is unreachable or returning empty data.
- * No hardcoded fake hardware metrics, simulated battery, or fake stream telemetry.
+ * NocturPod Neutral Initial State
+ * Strictly represents empty / offline state before backend telemetry is received.
+ * Contains NO fabricated hardware metrics, fake FPS, fake temperatures, or simulated values.
  */
 
 export const EMPTY_DEVICE_STATUS = {
-  device_id: "nocturpod-edge-01",
-  device_name: "NocturPod Alpha-1",
-  id: "nocturpod-edge-01",
-  name: "NocturPod Alpha-1",
-  hardware_model: "Raspberry Pi 4 Model B 8GB",
-  camera_model: "OV5647 IR-Cut",
-  status: "OFFLINE",
-  camera_status: "OFFLINE",
-  wifi_status: "DISCONNECTED",
+  device_id: null,
+  device_name: null,
+  hardware_model: null,
+  camera_model: null,
+  status: 'OFFLINE',
+  camera_status: 'OFFLINE',
+  wifi_status: 'OFFLINE',
   wifi_ssid: null,
   wifi_rssi: null,
   ip_address: null,
@@ -23,15 +21,19 @@ export const EMPTY_DEVICE_STATUS = {
   cpu_usage_percent: null,
   ram_usage_percent: null,
   uptime_seconds: null,
-  software_version: "1.0.0",
-  ai_model_version: "Adaptive CLAHE + YOLOv8n",
-  stream_fps: 0,
-  stream_resolution: "1280x720",
+  software_version: null,
+  ai_model_version: null,
+  stream_fps: null,
+  stream_resolution: null,
   last_heartbeat: null
 };
 
-export const EMPTY_METRICS = {
-  capturesToday: 0,
-  recordingsToday: 0,
-  enhancementsCompleted: 0
+export const HARDWARE_SPECIFICATIONS = {
+  architecture: "Broadcom BCM2711, Quad core Cortex-A72 (ARM v8) 64-bit SoC @ 1.8GHz",
+  model: "Raspberry Pi 4 Model B (8GB RAM)",
+  cameraSensor: "OmniVision OV5647 (5MP CMOS, Fixed Focus, M12 Mount)",
+  irCutFilter: "Mechanical IR-Cut switch with 850nm dual IR LEDs",
+  pipeline: "Picamera2 / libcamera native edge agent pipeline",
+  backendHost: "Render Linux Environment (Gunicorn/Flask with Async AI Worker)",
+  database: "Supabase PostgreSQL & Supabase S3-Compatible Storage"
 };

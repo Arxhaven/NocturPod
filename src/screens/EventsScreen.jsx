@@ -2,10 +2,7 @@ import React, { useState } from 'react';
 import EventTimeline from '../components/EventTimeline';
 import { 
   Search, 
-  Activity, 
-  Sparkles,
-  Camera, 
-  Film
+  Activity
 } from 'lucide-react';
 import './EventsScreen.css';
 
@@ -54,9 +51,9 @@ export default function EventsScreen({ events = [], onSelectEvent }) {
         <div className="search-wrap">
           <Search size={14} className="search-icon" />
           <input 
-            type="text"
+            type="text" 
             className="search-input mono"
-            placeholder="Search events by ID..."
+            placeholder="Search events by ID or notes..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -74,7 +71,7 @@ export default function EventsScreen({ events = [], onSelectEvent }) {
           <div className="empty-state-panel">
             <Activity size={36} className="empty-icon" />
             <h3 className="empty-title">NO EVENTS RECORDED</h3>
-            <p className="empty-sub mono">Operational events created by captures and recordings will appear here.</p>
+            <p className="empty-sub mono">Operational events created by genuine captures and recordings will appear here.</p>
           </div>
         ) : (
           <div className="timeline-wrap">

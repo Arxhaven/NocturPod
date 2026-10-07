@@ -5,23 +5,33 @@ import {
   Cpu, 
   Camera, 
   Wifi, 
-  Thermometer, 
-  Clock, 
   RefreshCw,
-  Server,
-  Layers
+  Info
 } from 'lucide-react';
+import { HARDWARE_SPECIFICATIONS } from '../data/mockData';
 import './DeviceScreen.css';
 
 export default function DeviceScreen({ deviceStatus, onRefreshTelemetry }) {
   const isOnline = deviceStatus?.status === 'ONLINE' || deviceStatus?.status === 'RECORDING';
-  const camStatus = deviceStatus?.camera_status || deviceStatus?.cameraStatus || (isOnline ? 'ONLINE' : 'OFFLINE');
+  const camStatus = deviceStatus?.camera_status || 'N/A';
+  const wifiStatus = deviceStatus?.wifi_status || 'N/A';
 
   const formatUptime = (seconds) => {
-    if (!seconds && seconds !== 0) return 'N/A';
+    if (seconds == null || isNaN(seconds)) return 'N/A';
     const hrs = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
     return `${hrs}h ${mins}m`;
+  };
+
+  const formatLastHeartbeat = (iso) => {
+    if (!iso) return 'N/A';
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return String(iso);
+      return d.toLocaleTimeString() + ' (' + d.toLocaleDateString() + ')';
+    } catch {
+      return String(iso);
+    }
   };
 
   return (
@@ -30,11 +40,11 @@ export default function DeviceScreen({ deviceStatus, onRefreshTelemetry }) {
       <div className="device-summary-strip glass-panel">
         <div className="dev-strip-head">
           <div className="dev-title-row">
-            <span className="dev-title">EMBEDDED HARDWARE TELEMETRY</span>
-            <StatusBadge status={isOnline ? 'ONLINE' : 'OFFLINE'} />
+            <span className="dev-title">AUTHENTIC EMBEDDED TELEMETRY</span>
+            <StatusBadge status={isOnline ? (deviceStatus?.status || 'ONLINE') : 'OFFLINE'} />
           </div>
           <span className="dev-meta mono">
-            NODE IDENTIFIER: {deviceStatus?.device_id || deviceStatus?.id || 'nocturpod-edge-01'} • MODEL: {deviceStatus?.hardware_model || deviceStatus?.hardware || 'Raspberry Pi 4 Model B 8GB'}
+            NODE ID: {deviceStatus?.device_id || 'N/A'} • LAST HEARTBEAT: {formatLastHeartbeat(deviceStatus?.last_heartbeat)}
           </span>
         </div>
 
@@ -50,14 +60,14 @@ export default function DeviceScreen({ deviceStatus, onRefreshTelemetry }) {
         </div>
       </div>
 
-      {/* Main Hardware Subsystem Matrix */}
+      {/* Main Hardware Subsystem Matrix (Realtime Backend Registers) */}
       <div className="subsystems-grid">
         {/* Raspberry Pi Compute Card */}
         <div className="subsystem-card glass-panel">
           <div className="sub-header">
             <div className="sub-title-wrap">
               <Cpu size={16} className="sub-icon" />
-              <span className="sub-title">COMPUTE SYSTEM</span>
+              <span className="sub-title">COMPUTE TELEMETRY</span>
             </div>
             <StatusBadge status={isOnline ? 'ONLINE' : 'OFFLINE'} size="small" />
           </div>
@@ -65,7 +75,7 @@ export default function DeviceScreen({ deviceStatus, onRefreshTelemetry }) {
           <div className="sub-body mono">
             <div className="sub-row">
               <span className="s-label">SOC HARDWARE:</span>
-              <span className="s-val">{deviceStatus?.hardware_model || deviceStatus?.hardware || 'Raspberry Pi 4 Model B 8GB'}</span>
+              <span className="s-val">{deviceStatus?.hardware_model || 'N/A'}</span>
             </div>
             <div className="sub-row">
               <span className="s-label">CPU TEMPERATURE:</span>
@@ -109,23 +119,25 @@ export default function DeviceScreen({ deviceStatus, onRefreshTelemetry }) {
           <div className="sub-body mono">
             <div className="sub-row">
               <span className="s-label">CAMERA SENSOR:</span>
-              <span className="s-val">{deviceStatus?.camera_model || deviceStatus?.cameraModel || 'OV5647 IR-Cut'}</span>
-            </div>
-            <div className="sub-row">
-              <span className="s-label">IR ILLUMINATION:</span>
-              <span className="s-val active">850nm IR Illumination</span>
-            </div>
-            <div className="sub-row">
-              <span className="s-label">STREAM RESOLUTION:</span>
-              <span className="s-val">{deviceStatus?.stream_resolution || deviceStatus?.streamResolution || '1280x720'}</span>
-            </div>
-            <div className="sub-row">
-              <span className="s-label">STREAM FPS:</span>
-              <span className="s-val">{deviceStatus?.stream_fps || deviceStatus?.streamFps || (isOnline ? 15 : 0)} FPS</span>
+              <span className="s-val">{deviceStatus?.camera_model || 'N/A'}</span>
             </div>
             <div className="sub-row">
               <span className="s-label">CAMERA STATUS:</span>
               <span className={`s-val ${camStatus === 'ONLINE' ? 'active' : ''}`}>{camStatus}</span>
+            </div>
+            <div className="sub-row">
+              <span className="s-label">STREAM RESOLUTION:</span>
+              <span className="s-val">{deviceStatus?.stream_resolution || 'N/A'}</span>
+            </div>
+            <div className="sub-row">
+              <span className="s-label">STREAM FPS:</span>
+              <span className="s-val">
+                {isOnline && deviceStatus?.stream_fps != null ? `${deviceStatus.stream_fps} FPS` : 'N/A'}
+              </span>
+            </div>
+            <div className="sub-row">
+              <span className="s-label">PIPELINE:</span>
+              <span className="s-val">Picamera2 / libcamera</span>
             </div>
           </div>
         </div>
@@ -135,16 +147,16 @@ export default function DeviceScreen({ deviceStatus, onRefreshTelemetry }) {
           <div className="sub-header">
             <div className="sub-title-wrap">
               <Wifi size={16} className="sub-icon" />
-              <span className="sub-title">NETWORK CONNECTIVITY</span>
+              <span className="sub-title">NETWORK TELEMETRY</span>
             </div>
-            <StatusBadge status={deviceStatus?.wifi_status === 'CONNECTED' ? 'ONLINE' : 'OFFLINE'} size="small" />
+            <StatusBadge status={wifiStatus === 'CONNECTED' ? 'ONLINE' : 'OFFLINE'} size="small" />
           </div>
 
           <div className="sub-body mono">
             <div className="sub-row">
               <span className="s-label">WI-FI STATUS:</span>
-              <span className={`s-val ${deviceStatus?.wifi_status === 'CONNECTED' ? 'active' : ''}`}>
-                {deviceStatus?.wifi_status || 'DISCONNECTED'}
+              <span className={`s-val ${wifiStatus === 'CONNECTED' ? 'active' : ''}`}>
+                {wifiStatus}
               </span>
             </div>
             <div className="sub-row">
@@ -158,8 +170,8 @@ export default function DeviceScreen({ deviceStatus, onRefreshTelemetry }) {
               </span>
             </div>
             <div className="sub-row">
-              <span className="s-label">BACKEND LINK:</span>
-              <span className="s-val active">HTTPS / PostgREST</span>
+              <span className="s-label">HEARTBEAT FREQ:</span>
+              <span className="s-val">~3.0s interval</span>
             </div>
           </div>
         </div>
@@ -169,9 +181,9 @@ export default function DeviceScreen({ deviceStatus, onRefreshTelemetry }) {
           <div className="sub-header">
             <div className="sub-title-wrap">
               <HardDrive size={16} className="sub-icon" />
-              <span className="sub-title">PERSISTENCE & AGENT</span>
+              <span className="sub-title">STORAGE & AGENT</span>
             </div>
-            <StatusBadge status="READY" size="small" />
+            <StatusBadge status={isOnline ? 'ONLINE' : 'OFFLINE'} size="small" />
           </div>
 
           <div className="sub-body mono">
@@ -183,21 +195,48 @@ export default function DeviceScreen({ deviceStatus, onRefreshTelemetry }) {
               </span>
             </div>
             <div className="sub-row">
-              <span className="s-label">LOCAL MEDIA SPOOL:</span>
-              <span className="s-val active">~/nocturpod/media/</span>
-            </div>
-            <div className="sub-row">
               <span className="s-label">SERVICE DAEMON:</span>
-              <span className="s-val">nocturpod-agent.service (systemd)</span>
+              <span className="s-val">nocturpod-agent.service</span>
             </div>
             <div className="sub-row">
               <span className="s-label">SOFTWARE VERSION:</span>
-              <span className="s-val">{deviceStatus?.software_version || '1.0.0'}</span>
+              <span className="s-val">{deviceStatus?.software_version || 'N/A'}</span>
             </div>
             <div className="sub-row">
               <span className="s-label">AI PIPELINE:</span>
-              <span className="s-val">{deviceStatus?.ai_model_version || 'Adaptive CLAHE + YOLOv8n'}</span>
+              <span className="s-val">{deviceStatus?.ai_model_version || 'N/A'}</span>
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Static Hardware & System Specifications (Clearly Labelled) */}
+      <div className="specs-section glass-panel">
+        <div className="specs-header">
+          <div className="specs-title-wrap">
+            <Info size={15} className="specs-icon" />
+            <span className="specs-title">STATIC HARDWARE SPECIFICATIONS</span>
+          </div>
+          <span className="specs-notice mono">SYSTEM BENCHMARK SPECIFICATIONS</span>
+        </div>
+
+        <div className="specs-grid mono">
+          <div className="spec-card">
+            <span className="spec-kicker">EDGE NODE HARDWARE</span>
+            <span className="spec-val">{HARDWARE_SPECIFICATIONS.model}</span>
+            <span className="spec-desc">{HARDWARE_SPECIFICATIONS.architecture}</span>
+          </div>
+
+          <div className="spec-card">
+            <span className="spec-kicker">OPTICAL & IR SUBSYSTEM</span>
+            <span className="spec-val">{HARDWARE_SPECIFICATIONS.cameraSensor}</span>
+            <span className="spec-desc">{HARDWARE_SPECIFICATIONS.irCutFilter}</span>
+          </div>
+
+          <div className="spec-card">
+            <span className="spec-kicker">BACKEND & STORAGE ARCHITECTURE</span>
+            <span className="spec-val">Gunicorn + Supabase REST / S3</span>
+            <span className="spec-desc">{HARDWARE_SPECIFICATIONS.backendHost}</span>
           </div>
         </div>
       </div>

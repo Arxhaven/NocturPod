@@ -13,15 +13,23 @@ import './Sidebar.css';
 
 const NAV_ITEMS = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-  { id: 'live', label: 'Live Monitor', icon: Video, badge: 'LIVE' },
+  { id: 'live', label: 'Live Monitor', icon: Video, hasLiveBadge: true },
   { id: 'images', label: 'Captures', icon: ImageIcon },
   { id: 'footage', label: 'Recordings', icon: Film },
   { id: 'events', label: 'Events', icon: Activity },
   { id: 'device', label: 'Device', icon: HardDrive },
 ];
 
-export default function Sidebar({ activeTab, onSelectTab, isCollapsed, onToggleCollapse, deviceStatus }) {
-  const isOnline = deviceStatus?.status === 'ONLINE' || deviceStatus?.status === 'RECORDING';
+export default function Sidebar({ 
+  activeTab, 
+  onSelectTab, 
+  isCollapsed, 
+  onToggleCollapse, 
+  deviceStatus,
+  backendOnline
+}) {
+  const isDeviceOnline = deviceStatus?.status === 'ONLINE' || deviceStatus?.status === 'RECORDING';
+  const isCameraOnline = deviceStatus?.camera_status === 'ONLINE';
 
   return (
     <aside className={`sidebar-container ${isCollapsed ? 'collapsed' : ''}`}>
@@ -39,17 +47,21 @@ export default function Sidebar({ activeTab, onSelectTab, isCollapsed, onToggleC
         )}
       </div>
 
-      {/* Heartbeat Status Indicator */}
+      {/* Heartbeat Status Indicator (Strictly Real State) */}
       <div className="sidebar-heartbeat">
         <div className="heartbeat-indicator">
-          <span className={`heartbeat-pulse ${isOnline ? 'online' : 'offline'}`} />
-          <span className={`heartbeat-dot ${isOnline ? 'online' : 'offline'}`} />
+          <span className={`heartbeat-pulse ${isDeviceOnline ? 'online' : 'offline'}`} />
+          <span className={`heartbeat-dot ${isDeviceOnline ? 'online' : 'offline'}`} />
         </div>
         {!isCollapsed && (
           <div className="heartbeat-meta">
-            <span className="heartbeat-label">EDGE HEARTBEAT</span>
+            <span className="heartbeat-label">EDGE NODE</span>
             <span className="heartbeat-val mono">
-              {isOnline ? 'ONLINE' : 'OFFLINE'}
+              {!backendOnline 
+                ? 'BACKEND OFFLINE' 
+                : isDeviceOnline 
+                  ? 'ONLINE' 
+                  : 'OFFLINE'}
             </span>
           </div>
         )}
@@ -63,7 +75,7 @@ export default function Sidebar({ activeTab, onSelectTab, isCollapsed, onToggleC
           return (
             <button
               key={item.id}
-              className={`nav-item-btn ${isActive ? 'active' : ''}`}
+              className={`nav-item ${isActive ? 'active' : ''}`}
               onClick={() => onSelectTab(item.id)}
               title={isCollapsed ? item.label : undefined}
             >
@@ -73,9 +85,9 @@ export default function Sidebar({ activeTab, onSelectTab, isCollapsed, onToggleC
               {!isCollapsed && (
                 <>
                   <span className="nav-label">{item.label}</span>
-                  {item.badge && (
-                    <span className={`nav-badge ${isOnline ? 'badge-pulse' : 'badge-idle'}`}>
-                      {item.badge}
+                  {item.hasLiveBadge && (
+                    <span className={`nav-badge ${isCameraOnline ? 'badge-live' : 'badge-offline'}`}>
+                      {isCameraOnline ? 'LIVE' : 'OFFLINE'}
                     </span>
                   )}
                 </>

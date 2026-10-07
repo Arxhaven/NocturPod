@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
 import { 
   Search, 
-  Sparkles, 
   Maximize2,
   Image as ImageIcon,
   Clock,
-  CheckCircle2,
-  AlertCircle
+  CheckCircle2
 } from 'lucide-react';
+import { resolveMediaUrl } from '../services/api';
 import './ImagesScreen.css';
 
 export default function ImagesScreen({ images = [], onSelectImage }) {
@@ -28,7 +27,7 @@ export default function ImagesScreen({ images = [], onSelectImage }) {
       {/* Top Search Bar */}
       <div className="images-filter-bar glass-panel">
         <div className="img-chips">
-          <span className="chips-title mono">TOTAL CAPTURES: {images.length}</span>
+          <span className="chips-title mono">GENUINE CAPTURES: {images.length}</span>
         </div>
 
         <div className="search-wrap">
@@ -49,7 +48,7 @@ export default function ImagesScreen({ images = [], onSelectImage }) {
           <ImageIcon size={40} className="empty-icon" />
           <h3 className="empty-title">NO CAPTURES YET</h3>
           <p className="empty-sub mono">
-            Trigger a manual capture from the Live Monitor to generate original and AI enhanced media.
+            Trigger a manual capture from the Live Monitor to generate genuine OV5647 stills.
           </p>
         </div>
       ) : (
@@ -57,7 +56,8 @@ export default function ImagesScreen({ images = [], onSelectImage }) {
           {filtered.map((item) => {
             const isEnhanced = item.processing_status === 'COMPLETE' && item.enhanced_url;
             const isProcessing = item.processing_status === 'PROCESSING' || item.processing_status === 'PENDING';
-            const displayUrl = isEnhanced ? item.enhanced_url : (item.original_url || item.thumbnail);
+            const rawDisplayUrl = isEnhanced ? item.enhanced_url : (item.original_url || item.thumbnail);
+            const displayUrl = resolveMediaUrl(rawDisplayUrl);
 
             return (
               <div 
@@ -80,7 +80,7 @@ export default function ImagesScreen({ images = [], onSelectImage }) {
                   <div className="img-hover-actions">
                     <span className="expand-pill mono">
                       <Maximize2 size={13} />
-                      <span>INSPECT ORIGINAL & ENHANCED</span>
+                      <span>INSPECT STILL</span>
                     </span>
                   </div>
 
@@ -88,7 +88,7 @@ export default function ImagesScreen({ images = [], onSelectImage }) {
                     {isEnhanced ? (
                       <span className="ai-status-pill complete mono">
                         <CheckCircle2 size={11} />
-                        <span>ENHANCED</span>
+                        <span>AI ENHANCED</span>
                       </span>
                     ) : isProcessing ? (
                       <span className="ai-status-pill processing mono">
@@ -105,7 +105,9 @@ export default function ImagesScreen({ images = [], onSelectImage }) {
 
                 <div className="img-meta-footer">
                   <span className="img-event-id mono">{item.event_id || item.id}</span>
-                  <span className="img-time mono">{item.timestamp ? new Date(item.timestamp).toLocaleTimeString() : 'Recent'}</span>
+                  <span className="img-time mono">
+                    {item.timestamp ? new Date(item.timestamp).toLocaleTimeString() : 'N/A'}
+                  </span>
                 </div>
               </div>
             );

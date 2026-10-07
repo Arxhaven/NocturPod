@@ -4,13 +4,15 @@ import {
   WifiOff, 
   Camera, 
   Clock, 
-  Circle
+  Circle,
+  Server
 } from 'lucide-react';
 import StatusBadge from './StatusBadge';
 import './TopBar.css';
 
 export default function TopBar({ 
   deviceStatus, 
+  backendOnline,
   onQuickCapture, 
   activeTab, 
   isRecording, 
@@ -28,18 +30,20 @@ export default function TopBar({
     return () => clearInterval(interval);
   }, []);
 
-  const isOnline = deviceStatus?.status === 'ONLINE' || deviceStatus?.status === 'RECORDING';
-  const camStatus = deviceStatus?.camera_status || deviceStatus?.cameraStatus || (isOnline ? 'ONLINE' : 'OFFLINE');
+  const isDeviceOnline = deviceStatus?.status === 'ONLINE' || deviceStatus?.status === 'RECORDING';
+  const camStatus = deviceStatus?.camera_status || 'N/A';
+  const wifiStatus = deviceStatus?.wifi_status || 'N/A';
+  const isWifiConnected = wifiStatus === 'CONNECTED';
 
   const getPageTitle = (tab) => {
     switch (tab) {
-      case 'overview': return { title: 'Overview', sub: 'NOCTURPOD // NODE STATUS & METRICS' };
+      case 'overview': return { title: 'Overview', sub: 'NODE TELEMETRY & LIVE OPERATIONAL METRICS' };
       case 'live': return { title: 'Live Monitor', sub: 'REAL-TIME OV5647 FEED & CAMERA CONTROLS' };
-      case 'images': return { title: 'Captures', sub: 'ORIGINAL & AI ENHANCED STILLS' };
-      case 'footage': return { title: 'Recordings', sub: 'ORIGINAL & AI ENHANCED VIDEO CLIPS' };
+      case 'images': return { title: 'Captures', sub: 'GENUINE OV5647 STILLS & AI ENHANCEMENTS' };
+      case 'footage': return { title: 'Recordings', sub: 'GENUINE FOOTAGE & AI ENHANCED CLIPS' };
       case 'events': return { title: 'Events', sub: 'CHRONOLOGICAL SENSOR AUDIT TRAIL' };
       case 'device': return { title: 'Device Telemetry', sub: 'RASPBERRY PI 4 HARDWARE REGISTERS' };
-      default: return { title: 'NocturPod', sub: 'EDGE SURVEILLANCE SYSTEM' };
+      default: return { title: 'NocturPod', sub: 'EDGE SURVEILLANCE DASHBOARD' };
     }
   };
 
@@ -55,41 +59,51 @@ export default function TopBar({
       </div>
 
       <div className="topbar-right">
-        {/* Device telemetry pill */}
+        {/* Backend Connectivity Indicator */}
+        <div className="backend-link-pill mono" title="Cloud API Backend Status">
+          <Server size={13} className={backendOnline ? "server-icon online" : "server-icon offline"} />
+          <span>BACKEND: {backendOnline ? 'CONNECTED' : 'UNAVAILABLE'}</span>
+        </div>
+
+        {/* Real Device Telemetry Pill */}
         <div className="telemetry-bar">
-          <div className="telemetry-item" title="Device Connectivity">
-            {isOnline ? (
+          <div className="telemetry-item" title="Device Wi-Fi Link">
+            {isWifiConnected ? (
               <Wifi size={14} className="telemetry-icon active" />
             ) : (
               <WifiOff size={14} className="telemetry-icon offline" />
             )}
-            <span className="mono">{deviceStatus?.wifi_status || (isOnline ? 'CONNECTED' : 'DISCONNECTED')}</span>
+            <span className="mono">{wifiStatus}</span>
           </div>
 
           <div className="telemetry-divider" />
 
-          <div className="telemetry-item" title="Camera Sensor">
+          <div className="telemetry-item" title="OV5647 Camera Sensor State">
             <Camera size={14} className={`telemetry-icon ${camStatus === 'ONLINE' ? 'active' : ''}`} />
-            <span className="mono">OV5647 {camStatus}</span>
+            <span className="mono">CAM {camStatus}</span>
           </div>
 
           <div className="telemetry-divider" />
 
-          <div className="telemetry-item" title="System Clock">
+          <div className="telemetry-item" title="Local Dashboard Clock">
             <Clock size={14} className="telemetry-icon" />
-            <span className="mono">{currentTime || '00:00:00'}</span>
+            <span className="mono">{currentTime || '--:--:--'}</span>
           </div>
         </div>
 
-        {/* Global Node Status Badge */}
-        <StatusBadge status={isOnline ? 'ONLINE' : 'OFFLINE'} size="normal" pulse={isOnline} />
+        {/* Device State Badge */}
+        <StatusBadge 
+          status={isDeviceOnline ? (deviceStatus?.status || 'ONLINE') : 'OFFLINE'} 
+          size="normal" 
+        />
 
         {/* Quick action: Capture */}
         {onQuickCapture && (
           <button 
             className="quick-trigger-btn"
             onClick={onQuickCapture}
-            title="Trigger edge capture"
+            title={isDeviceOnline ? "Trigger edge snapshot" : "Device is offline"}
+            disabled={!backendOnline}
           >
             <Camera size={14} />
             <span>CAPTURE</span>
@@ -102,6 +116,7 @@ export default function TopBar({
             className={`quick-trigger-btn record-toggle-btn ${isRecording ? 'recording' : ''}`}
             onClick={() => onToggleRecording(!isRecording)}
             title={isRecording ? "Stop Recording" : "Start Recording"}
+            disabled={!backendOnline}
           >
             <Circle size={14} fill={isRecording ? "currentColor" : "none"} />
             <span>{isRecording ? "STOP REC" : "RECORD"}</span>

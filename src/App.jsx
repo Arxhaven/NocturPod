@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import LiveBackground from './components/LiveBackground';
 import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
@@ -14,7 +14,6 @@ import DeviceScreen from './screens/DeviceScreen';
 
 import { EMPTY_DEVICE_STATUS } from './data/mockData';
 import { 
-  checkBackendHealth, 
   fetchDeviceStatus, 
   fetchEvents, 
   fetchImages, 
@@ -28,153 +27,193 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [deviceStatus, setDeviceStatus] = useState(EMPTY_DEVICE_STATUS);
+  const [backendOnline, setBackendOnline] = useState(false);
+  
   const [events, setEvents] = useState([]);
   const [footage, setFootage] = useState([]);
   const [images, setImages] = useState([]);
-  const [backendOnline, setBackendOnline] = useState(false);
 
   const [selectedImage, setSelectedImage] = useState(null);
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
   const [toastNotification, setToastNotification] = useState(null);
 
-  const showToast = useCallback((msg) => {
-    setToastNotification(msg);
-    setTimeout(() => setToastNotification(null), 3500);
+  const isPollingRef = useRef(false);
+
+  const showToast = useCallback((msg, isWarning = false) => {
+    setToastNotification({ text: msg, isWarning });
+    setTimeout(() => setToastNotification(null), 4000);
   }, []);
 
-  // Synchronize data from backend
-  const refreshAllData = useCallback(async () => {
+  // Fetch real media collections from backend
+  const refreshMedia = useCallback(async () => {
     try {
-      const [dev, evts, imgs, foot] = await Promise.all([
-        fetchDeviceStatus(),
+      const [evts, imgs, foot] = await Promise.all([
         fetchEvents(),
         fetchImages(),
         fetchFootage()
       ]);
-      if (dev) {
-        setDeviceStatus(dev);
-        if (dev.status === 'RECORDING') {
-          setIsRecording(true);
-        } else if (dev.status === 'ONLINE' && isRecording) {
-          setIsRecording(false);
-        }
-      }
       if (evts) setEvents(evts);
       if (imgs) setImages(imgs);
       if (foot) setFootage(foot);
     } catch (err) {
-      console.warn("Data sync notice:", err);
+      console.warn("Media sync notice:", err);
     }
-  }, [isRecording]);
+  }, []);
 
-  // Check Backend health and poll telemetry
+  // Single authoritative polling loop for device telemetry
   useEffect(() => {
-    async function verifyBackend() {
-      const health = await checkBackendHealth();
-      if (health.connected) {
-        setBackendOnline(true);
-        refreshAllData();
-      } else {
-        setBackendOnline(false);
-      }
-    }
-    verifyBackend();
+    let isMounted = true;
 
-    const interval = setInterval(() => {
-      fetchDeviceStatus().then(dev => {
+    const pollTelemetry = async () => {
+      if (isPollingRef.current) return;
+      isPollingRef.current = true;
+
+      try {
+        const dev = await fetchDeviceStatus();
+        if (!isMounted) return;
+
         if (dev) {
-          setDeviceStatus(dev);
           setBackendOnline(true);
+          setDeviceStatus(dev);
+
+          // Synchronize recording state authoritatively from device status
+          if (dev.status === 'RECORDING') {
+            setIsRecording(true);
+          } else if (dev.status === 'ONLINE' && isRecording) {
+            setIsRecording(false);
+          }
         } else {
+          // Backend is unreachable or returned error
           setBackendOnline(false);
+          setDeviceStatus((prev) => ({
+            ...prev,
+            status: 'OFFLINE',
+            camera_status: 'OFFLINE',
+            wifi_status: 'OFFLINE'
+          }));
         }
-      });
-      // Periodically refresh captures/events if active tab requires it
-      if (activeTab === 'events' || activeTab === 'images' || activeTab === 'footage') {
-        refreshAllData();
+      } catch (err) {
+        if (!isMounted) return;
+        setBackendOnline(false);
+        setDeviceStatus((prev) => ({
+          ...prev,
+          status: 'OFFLINE',
+          camera_status: 'OFFLINE',
+          wifi_status: 'OFFLINE'
+        }));
+      } finally {
+        isPollingRef.current = false;
       }
+    };
+
+    // Initial immediate poll & media load
+    pollTelemetry();
+    refreshMedia();
+
+    // Central 3-second heartbeat polling interval
+    const interval = setInterval(() => {
+      pollTelemetry();
     }, 3000);
 
-    return () => clearInterval(interval);
-  }, [activeTab, refreshAllData]);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [refreshMedia, isRecording]);
 
+  // Refresh media when switching to media/events tabs
+  useEffect(() => {
+    if (activeTab === 'images' || activeTab === 'footage' || activeTab === 'events') {
+      refreshMedia();
+    }
+  }, [activeTab, refreshMedia]);
+
+  // Genuine Edge Snapshot Capture flow
   const handleQuickCapture = async () => {
+    if (!backendOnline) {
+      showToast('BACKEND UNAVAILABLE — Cannot dispatch capture command', true);
+      return;
+    }
+
     try {
-      showToast('Dispatching capture command to NocturPod edge node...');
+      showToast('CAPTURE COMMAND SENT — WAITING FOR EDGE NODE...');
       const res = await triggerSnapshot();
-      showToast(`Capture queued [${res.command_id}]. Acquiring frame & enhancing...`);
+      showToast(`Command acknowledged [${res.command_id || 'DISPATCHED'}]. Acquiring frame...`);
       
-      // Refresh after a brief delay for edge acquisition & enhancement
+      // Allow brief period for edge acquisition and Supabase ingestion
       setTimeout(async () => {
-        const [updatedImgs, updatedEvts] = await Promise.all([
-          fetchImages(),
-          fetchEvents()
-        ]);
-        if (updatedImgs) setImages(updatedImgs);
-        if (updatedEvts) setEvents(updatedEvts);
-      }, 2500);
+        await refreshMedia();
+        showToast('Capture processed and registered in media archive');
+      }, 3500);
     } catch (err) {
-      showToast(`Capture Error: ${err.message}`);
+      showToast(`Capture Error: ${err.message}`, true);
     }
   };
 
+  // Genuine Edge Video Recording flow
   const handleToggleRecording = async (nextRecordingState) => {
+    if (!backendOnline) {
+      showToast('BACKEND UNAVAILABLE — Cannot toggle recording', true);
+      return;
+    }
+
     try {
       const actionText = nextRecordingState ? 'START RECORDING' : 'STOP RECORDING';
-      showToast(`Dispatching ${actionText} to edge node...`);
+      showToast(`COMMAND SENT: ${actionText} — WAITING FOR DEVICE...`);
       await toggleRecording(nextRecordingState);
+      
+      // Update optimistic state while device processes command
       setIsRecording(nextRecordingState);
-      showToast(nextRecordingState ? 'Recording initiated' : 'Recording stopped. Processing...');
+      showToast(nextRecordingState 
+        ? 'RECORDING COMMAND QUEUED — Edge node activating storage stream' 
+        : 'STOPPING RECORDING — Edge node finalizing video asset...'
+      );
 
       if (!nextRecordingState) {
-        // Refresh recordings after stop
         setTimeout(async () => {
-          const [updatedFoot, updatedEvts] = await Promise.all([
-            fetchFootage(),
-            fetchEvents()
-          ]);
-          if (updatedFoot) setFootage(updatedFoot);
-          if (updatedEvts) setEvents(updatedEvts);
-        }, 3000);
+          await refreshMedia();
+        }, 3500);
       }
     } catch (err) {
-      showToast(`Record Error: ${err.message}`);
+      showToast(`Record Error: ${err.message}`, true);
     }
   };
 
   return (
-    <div className="nocturpod-app-shell">
+    <div className="app-shell">
       <LiveBackground />
 
-      {/* Primary Sidebar */}
+      {/* Primary Navigation Sidebar */}
       <Sidebar 
         activeTab={activeTab} 
         onSelectTab={setActiveTab} 
         isCollapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         deviceStatus={deviceStatus}
+        backendOnline={backendOnline}
       />
 
-      {/* Main Workspace */}
-      <div className={`main-workspace ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      {/* Main App Workspace */}
+      <div className={`workspace-container ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
         <TopBar 
           deviceStatus={deviceStatus} 
+          backendOnline={backendOnline}
           onQuickCapture={handleQuickCapture}
           activeTab={activeTab}
           isRecording={isRecording}
           onToggleRecording={handleToggleRecording}
         />
 
-        {/* Global Toast */}
+        {/* Global Toast Notification */}
         {toastNotification && (
           <div className="app-toast-pill mono glass-panel">
-            <span className="toast-dot" />
-            <span className="toast-msg">{toastNotification}</span>
+            <span className={`toast-dot ${toastNotification.isWarning ? 'warning' : ''}`} />
+            <span className="toast-msg">{toastNotification.text}</span>
           </div>
         )}
 
-        {/* Workspace Content Router */}
+        {/* Authenticated Workspace Content Router */}
         <main className="content-viewport" id="main-content">
           {activeTab === 'overview' && (
             <OverviewScreen 
@@ -227,13 +266,23 @@ export default function App() {
           {activeTab === 'device' && (
             <DeviceScreen 
               deviceStatus={deviceStatus}
-              onRefreshTelemetry={refreshAllData}
+              onRefreshTelemetry={async () => {
+                const dev = await fetchDeviceStatus();
+                if (dev) {
+                  setDeviceStatus(dev);
+                  setBackendOnline(true);
+                  showToast('Device telemetry refreshed from edge node');
+                } else {
+                  setBackendOnline(false);
+                  showToast('Backend ping failed — Node unreachable', true);
+                }
+              }}
             />
           )}
         </main>
       </div>
 
-      {/* Modals for Original / Enhanced Viewing & Downloading */}
+      {/* Genuine Media Inspection Modals */}
       {selectedImage && (
         <ImageViewerModal 
           image={selectedImage}

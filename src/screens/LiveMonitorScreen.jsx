@@ -1,7 +1,7 @@
 import React from 'react';
 import LivePlayer from '../components/LivePlayer';
 import StatusBadge from '../components/StatusBadge';
-import { Camera, Circle, Cpu, Radio, Shield } from 'lucide-react';
+import { Camera, Circle } from 'lucide-react';
 import './LiveMonitorScreen.css';
 
 export default function LiveMonitorScreen({ 
@@ -11,9 +11,9 @@ export default function LiveMonitorScreen({
   onToggleRecording 
 }) {
   const isOnline = deviceStatus?.status === 'ONLINE' || deviceStatus?.status === 'RECORDING';
-  const camStatus = deviceStatus?.camera_status || deviceStatus?.cameraStatus || (isOnline ? 'ONLINE' : 'OFFLINE');
-  const resolution = deviceStatus?.stream_resolution || deviceStatus?.streamResolution || '1280x720';
-  const fps = deviceStatus?.stream_fps || deviceStatus?.streamFps || (isOnline ? 15 : 0);
+  const camStatus = deviceStatus?.camera_status || 'N/A';
+  const resolution = deviceStatus?.stream_resolution || 'N/A';
+  const fps = isOnline && deviceStatus?.stream_fps != null ? `${deviceStatus.stream_fps} FPS` : 'N/A';
 
   return (
     <div className="live-monitor-container">
@@ -26,8 +26,8 @@ export default function LiveMonitorScreen({
               isRecording={isRecording}
               onToggleRecording={onToggleRecording}
               cameraStatus={camStatus}
-              streamResolution={resolution}
-              streamFps={fps}
+              streamResolution={deviceStatus?.stream_resolution}
+              streamFps={deviceStatus?.stream_fps}
             />
           </div>
         </div>
@@ -38,23 +38,23 @@ export default function LiveMonitorScreen({
             <div className="panel-head">
               <div className="panel-title-wrap">
                 <span className="panel-title">LIVE CAMERA NODE</span>
-                <span className="panel-sub mono">{deviceStatus?.device_id || deviceStatus?.id || 'nocturpod-edge-01'}</span>
+                <span className="panel-sub mono">{deviceStatus?.device_id || 'nocturpod-edge-01'}</span>
               </div>
-              <StatusBadge status={isOnline ? 'ONLINE' : 'OFFLINE'} size="small" />
+              <StatusBadge status={isOnline ? (deviceStatus?.status || 'ONLINE') : 'OFFLINE'} size="small" />
             </div>
 
             <div className="telemetry-box mono">
               <div className="t-row">
-                <span>CAMERA STATUS:</span>
+                <span>CAMERA SENSOR:</span>
                 <span className={`t-val ${camStatus === 'ONLINE' ? 'active' : ''}`}>{camStatus}</span>
               </div>
               <div className="t-row">
-                <span>HARDWARE:</span>
-                <span className="t-val">{deviceStatus?.hardware_model || deviceStatus?.hardware || 'Raspberry Pi 4 8GB'}</span>
+                <span>HARDWARE MODEL:</span>
+                <span className="t-val">{deviceStatus?.hardware_model || 'N/A'}</span>
               </div>
               <div className="t-row">
-                <span>SENSOR:</span>
-                <span className="t-val">{deviceStatus?.camera_model || deviceStatus?.cameraModel || 'OV5647 IR-Cut'}</span>
+                <span>CAMERA MODEL:</span>
+                <span className="t-val">{deviceStatus?.camera_model || 'N/A'}</span>
               </div>
               <div className="t-row">
                 <span>STREAM RES:</span>
@@ -62,12 +62,12 @@ export default function LiveMonitorScreen({
               </div>
               <div className="t-row">
                 <span>STREAM FPS:</span>
-                <span className="t-val">{fps} FPS</span>
+                <span className="t-val">{fps}</span>
               </div>
               <div className="t-row">
                 <span>RECORDING:</span>
-                <span className={`t-val ${isRecording ? 'active' : ''}`}>
-                  {isRecording ? 'ACTIVE' : 'IDLE'}
+                <span className={`t-val ${isRecording ? 'recording' : ''}`}>
+                  {isRecording ? 'RECORDING' : 'IDLE'}
                 </span>
               </div>
             </div>
@@ -75,21 +75,21 @@ export default function LiveMonitorScreen({
 
           <div className="monitor-panel glass-panel">
             <div className="panel-head">
-              <span className="panel-title">ACTIONS</span>
+              <span className="panel-title">EDGE COMMANDS</span>
             </div>
             <div className="panel-quick-actions">
               <button 
                 className="btn-full-action capture-btn mono"
                 onClick={onSnapshot}
               >
-                <Camera size={16} />
+                <Camera size={15} />
                 <span>MANUAL CAPTURE</span>
               </button>
               <button 
                 className={`btn-full-action record-btn mono ${isRecording ? 'active' : ''}`}
                 onClick={() => onToggleRecording(!isRecording)}
               >
-                <Circle size={16} fill={isRecording ? "currentColor" : "none"} />
+                <Circle size={15} fill={isRecording ? "currentColor" : "none"} />
                 <span>{isRecording ? "STOP RECORDING" : "START RECORDING"}</span>
               </button>
             </div>

@@ -2,73 +2,25 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
-  animation: fadeIn 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  animation: fadeIn 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .live-monitor-grid {
   display: grid;
-  grid-template-columns: 1fr 360px;
+  grid-template-columns: 1fr 340px;
   gap: 20px;
+  align-items: start;
 }
 
 .monitor-main-col {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
 }
 
 .monitor-player-card {
   padding: 8px;
-}
-
-.camera-controls-strip {
-  padding: 10px 16px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.ctrl-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.ctrl-label {
-  font-size: 10px;
-  color: var(--color-muted-sage);
-  opacity: 0.8;
-}
-
-.ctrl-chip {
-  font-size: 10px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  background: rgba(11, 43, 38, 0.6);
-  border: 1px solid var(--border-muted);
-  color: var(--color-light-green);
-  transition: all var(--transition-fast);
-}
-
-.ctrl-chip:hover {
-  background: var(--color-medium-green);
-}
-
-.ctrl-chip.active {
-  background: rgba(35, 83, 71, 0.85);
-  border-color: var(--color-light-green);
-  box-shadow: 0 0 10px rgba(142, 182, 155, 0.2);
-}
-
-.ctrl-val {
-  font-size: 10px;
-  color: var(--color-light-green);
-}
-
-.ctrl-divider {
-  color: var(--border-muted);
 }
 
 .monitor-side-col {
@@ -115,10 +67,10 @@
   background: rgba(5, 31, 32, 0.6);
   border: 1px solid rgba(142, 182, 155, 0.15);
   border-radius: 4px;
-  padding: 8px 12px;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   font-size: 10px;
 }
 
@@ -134,85 +86,59 @@
 }
 
 .t-val.active {
-  color: #52c41a;
+  color: var(--status-online);
 }
 
-.target-stream-list {
+.t-val.recording {
+  color: var(--status-recording);
+  font-weight: 700;
+}
+
+.panel-quick-actions {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.target-stream-header {
-  font-size: 10px;
-  color: var(--color-muted-sage);
-  opacity: 0.7;
-}
-
-.target-item {
-  background: rgba(22, 56, 50, 0.4);
-  border: 1px solid rgba(142, 182, 155, 0.25);
-  border-radius: 4px;
-  padding: 8px 10px;
+.btn-full-action {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.target-badge-col {
-  display: flex;
-  justify-content: space-between;
   align-items: center;
-}
-
-.t-badge {
+  justify-content: center;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 4px;
   font-size: 11px;
-  font-weight: 700;
-  color: var(--color-light-green);
-  background: rgba(35, 83, 71, 0.7);
-  padding: 1px 6px;
-  border-radius: 3px;
-}
-
-.t-conf {
-  font-size: 11px;
-  color: #52c41a;
   font-weight: 600;
+  letter-spacing: 0.05em;
+  transition: all var(--transition-fast);
 }
 
-.target-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 9px;
-  color: var(--color-muted-sage);
-}
-
-.buffer-log-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 10px;
-}
-
-.buffer-entry {
-  display: flex;
-  justify-content: space-between;
-  padding: 4px 6px;
-  border-radius: 3px;
-  background: rgba(5, 31, 32, 0.5);
-  color: var(--color-muted-sage);
-}
-
-.buffer-entry.active {
-  border-left: 2px solid var(--color-light-green);
-  background: rgba(22, 56, 50, 0.5);
+.btn-full-action.capture-btn {
+  background: linear-gradient(135deg, rgba(35, 83, 71, 0.8) 0%, rgba(22, 56, 50, 0.9) 100%);
+  border: 1px solid var(--color-muted-sage);
   color: var(--color-light-green);
 }
 
-.b-event.highlight {
+.btn-full-action.capture-btn:hover {
+  background: var(--color-medium-green);
+  border-color: var(--color-light-green);
+}
+
+.btn-full-action.record-btn {
+  background: rgba(22, 56, 50, 0.6);
+  border: 1px solid var(--border-muted);
   color: var(--color-light-green);
-  font-weight: 600;
+}
+
+.btn-full-action.record-btn:hover {
+  background: var(--color-medium-green);
+}
+
+.btn-full-action.record-btn.active {
+  background: rgba(114, 38, 42, 0.85);
+  border-color: #ff7875;
+  color: #ffccc7;
+  animation: pulse-ring 1.5s infinite alternate;
 }
 
 @media (max-width: 1100px) {

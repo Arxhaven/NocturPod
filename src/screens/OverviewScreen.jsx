@@ -6,12 +6,8 @@ import {
   Camera, 
   Film, 
   Cpu, 
-  Thermometer, 
   HardDrive, 
-  Wifi, 
-  Sparkles,
-  ArrowRight,
-  Clock
+  ArrowRight
 } from 'lucide-react';
 import './OverviewScreen.css';
 
@@ -25,29 +21,34 @@ export default function OverviewScreen({
   onToggleRecording
 }) {
   const isOnline = deviceStatus?.status === 'ONLINE' || deviceStatus?.status === 'RECORDING';
-  const camStatus = deviceStatus?.camera_status || deviceStatus?.cameraStatus || (isOnline ? 'ONLINE' : 'OFFLINE');
-  const resolution = deviceStatus?.stream_resolution || deviceStatus?.streamResolution || '1280x720';
-  const fps = deviceStatus?.stream_fps || deviceStatus?.streamFps || (isOnline ? 15 : 0);
+  const camStatus = deviceStatus?.camera_status || 'N/A';
+  const resolution = deviceStatus?.stream_resolution || 'N/A';
+  const fps = isOnline && deviceStatus?.stream_fps != null ? `${deviceStatus.stream_fps} FPS` : 'N/A';
 
   const formatUptime = (seconds) => {
-    if (!seconds && seconds !== 0) return 'N/A';
+    if (seconds == null || isNaN(seconds)) return 'N/A';
     const hrs = Math.floor(seconds / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
     return `${hrs}h ${mins}m`;
   };
+
+  const cpuTemp = deviceStatus?.cpu_temp_c != null ? `${deviceStatus.cpu_temp_c}°C` : 'N/A';
+  const storage = deviceStatus?.storage_used_gb != null 
+    ? `${deviceStatus.storage_used_gb} GB${deviceStatus?.storage_total_gb != null ? ` / ${deviceStatus.storage_total_gb} GB` : ''}` 
+    : 'N/A';
+  const network = deviceStatus?.wifi_status || 'N/A';
+  const uptime = formatUptime(deviceStatus?.uptime_seconds);
 
   return (
     <div className="overview-container">
       {/* Top Device Hardware Summary Strip */}
       <section className="node-hero-strip glass-panel">
         <div className="node-title-col">
+          <span className="strip-kicker mono">AUTHENTIC EDGE TELEMETRY</span>
           <div className="node-badge-row">
-            <span className="node-name">{deviceStatus?.device_name || deviceStatus?.name || 'NOCTURPOD // α-1'}</span>
-            <StatusBadge status={isOnline ? 'ONLINE' : 'OFFLINE'} size="small" />
+            <span className="node-name">{deviceStatus?.device_name || deviceStatus?.device_id || 'NOCTURPOD EDGE NODE'}</span>
+            <StatusBadge status={isOnline ? (deviceStatus?.status || 'ONLINE') : 'OFFLINE'} size="small" />
           </div>
-          <span className="node-spec mono">
-            {deviceStatus?.hardware_model || 'Raspberry Pi 4 Model B 8GB'} • {deviceStatus?.camera_model || 'OV5647 IR-Cut'} • 850nm IR Illumination
-          </span>
         </div>
 
         <div className="node-status-grid">
@@ -55,27 +56,25 @@ export default function OverviewScreen({
             <span className="item-label mono">CAMERA</span>
             <span className={`item-val mono ${camStatus === 'ONLINE' ? 'active' : ''}`}>{camStatus}</span>
           </div>
+
           <div className="status-item">
             <span className="item-label mono">CPU TEMP</span>
-            <span className="item-val mono">
-              {deviceStatus?.cpu_temp_c != null ? `${deviceStatus.cpu_temp_c}°C` : 'N/A'}
-            </span>
+            <span className={`item-val mono ${cpuTemp !== 'N/A' ? 'active' : ''}`}>{cpuTemp}</span>
           </div>
+
           <div className="status-item">
             <span className="item-label mono">STORAGE</span>
-            <span className="item-val mono">
-              {deviceStatus?.storage_used_gb != null ? `${deviceStatus.storage_used_gb} GB` : 'N/A'}
-            </span>
+            <span className="item-val mono">{storage}</span>
           </div>
+
           <div className="status-item">
             <span className="item-label mono">NETWORK</span>
-            <span className={`item-val mono ${deviceStatus?.wifi_status === 'CONNECTED' ? 'active' : ''}`}>
-              {deviceStatus?.wifi_status || 'DISCONNECTED'}
-            </span>
+            <span className={`item-val mono ${network === 'CONNECTED' ? 'active' : ''}`}>{network}</span>
           </div>
+
           <div className="status-item">
             <span className="item-label mono">UPTIME</span>
-            <span className="item-val mono">{formatUptime(deviceStatus?.uptime_seconds)}</span>
+            <span className="item-val mono">{uptime}</span>
           </div>
         </div>
       </section>
@@ -86,13 +85,15 @@ export default function OverviewScreen({
           <div className="feed-card-header">
             <div className="feed-title-wrap">
               <span className="feed-title">REAL CAMERA FEED</span>
-              <span className="feed-meta mono">{resolution} • {fps} FPS</span>
+              <span className="feed-meta mono">
+                {resolution !== 'N/A' ? resolution : ''}{resolution !== 'N/A' && fps !== 'N/A' ? ' • ' : ''}{fps !== 'N/A' ? fps : ''}
+              </span>
             </div>
             <button 
               className="expand-monitor-btn mono"
               onClick={() => onNavigate('live')}
             >
-              <span>OPEN MONITOR</span>
+              <span>EXPAND MONITOR</span>
               <ArrowRight size={13} />
             </button>
           </div>
@@ -102,8 +103,8 @@ export default function OverviewScreen({
             isRecording={isRecording}
             onToggleRecording={onToggleRecording}
             cameraStatus={camStatus}
-            streamResolution={resolution}
-            streamFps={fps}
+            streamResolution={deviceStatus?.stream_resolution}
+            streamFps={deviceStatus?.stream_fps}
           />
         </div>
 
@@ -111,29 +112,27 @@ export default function OverviewScreen({
         <div className="overview-right-col">
           <div className="metrics-column">
             <MetricCard 
-              label="TOTAL CAPTURES"
+              label="CAPTURES"
               value={capturesCount}
-              subtext="Original + AI Enhanced Stills"
+              subtext="Real Stills in Supabase"
               icon={Camera}
-              trend="ACTIVE"
             />
             <MetricCard 
-              label="TOTAL RECORDINGS"
+              label="RECORDINGS"
               value={recordingsCount}
-              subtext="Original + AI Enhanced Clips"
+              subtext="Real Footage Clips"
               icon={Film}
-              trend="ACTIVE"
             />
             <MetricCard 
-              label="CPU UTILIZATION"
+              label="CPU"
               value={deviceStatus?.cpu_usage_percent != null ? `${deviceStatus.cpu_usage_percent}%` : 'N/A'}
-              subtext="Broadcom BCM2711 ARM64"
+              subtext="Telemetry Load"
               icon={Cpu}
             />
             <MetricCard 
-              label="RAM USAGE"
+              label="RAM"
               value={deviceStatus?.ram_usage_percent != null ? `${deviceStatus.ram_usage_percent}%` : 'N/A'}
-              subtext="System Memory Active"
+              subtext="Memory Allocated"
               icon={HardDrive}
             />
           </div>

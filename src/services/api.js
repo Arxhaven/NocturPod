@@ -1,15 +1,22 @@
 /**
  * NocturPod Production API Service Layer
- * Connects frontend to the production backend specified by VITE_API_URL.
+ * Connects frontend directly to the real Render backend.
+ * Never generates mock responses, simulated data, or fallback frames.
  */
 
 export const BACKEND_HOST =
   (import.meta.env.VITE_API_URL || 'https://nocturpod-njsi.onrender.com')
     .replace(/\/$/, '');
+
 export const API_BASE = `${BACKEND_HOST}/api`;
 
+/**
+ * Resolves media paths to absolute URLs.
+ * Relative backend media paths resolve against BACKEND_HOST.
+ * Absolute URLs (Supabase storage signed URLs) remain untouched.
+ */
 export function resolveMediaUrl(url) {
-  if (!url) return null;
+  if (!url || typeof url !== 'string') return null;
 
   if (url.startsWith('http://') || url.startsWith('https://')) {
     return url;
@@ -19,84 +26,101 @@ export function resolveMediaUrl(url) {
 }
 
 /**
- * Checks backend and edge device connectivity status.
+ * Helper to perform fetch requests with an automatic abort timeout.
+ */
+async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(id);
+    return res;
+  } catch (err) {
+    clearTimeout(id);
+    throw err;
+  }
+}
+
+/**
+ * Checks backend connectivity and edge device health status.
  */
 export async function checkBackendHealth() {
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
-    const res = await fetch(`${API_BASE}/device/health`, { signal: controller.signal });
-    clearTimeout(timeoutId);
+    const res = await fetchWithTimeout(`${API_BASE}/device/health`, {}, 5000);
     if (res.ok) {
       const data = await res.json();
       return { connected: true, data };
     }
   } catch (err) {
-    // Backend offline or network error
+    // Network error or backend cold start / unavailable
   }
-  return { connected: false, error: 'NocturPod Backend Offline' };
+  return { connected: false, error: 'Backend Unavailable' };
 }
 
 /**
- * Fetches real hardware telemetry and device status.
+ * Fetches real hardware telemetry and device status from backend.
+ * Returns null if the backend request fails.
  */
 export async function fetchDeviceStatus() {
   try {
-    const res = await fetch(`${API_BASE}/device/status`);
+    const res = await fetchWithTimeout(`${API_BASE}/device/status`, {}, 6000);
     if (res.ok) {
       return await res.json();
     }
   } catch (err) {
-    console.warn("Failed to fetch device status:", err);
+    // Backend unavailable or request timeout
   }
   return null;
 }
 
 /**
- * Fetches events list from backend / Supabase.
+ * Fetches real events list from backend / Supabase persistence.
  */
 export async function fetchEvents(filter = 'ALL', search = '') {
   try {
     const params = new URLSearchParams();
     if (filter && filter !== 'ALL') params.append('filter', filter);
     if (search && search.trim()) params.append('search', search.trim());
-    
-    const res = await fetch(`${API_BASE}/events?${params.toString()}`);
+
+    const res = await fetchWithTimeout(`${API_BASE}/events?${params.toString()}`, {}, 8000);
     if (res.ok) {
-      return await res.json();
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
     }
   } catch (err) {
-    console.warn("Failed to fetch events:", err);
+    console.warn("Failed to fetch events:", err.message);
   }
   return [];
 }
 
 /**
- * Fetches still image captures (both Original and Enhanced variants).
+ * Fetches real still image captures (both Original and Enhanced variants).
  */
 export async function fetchImages() {
   try {
-    const res = await fetch(`${API_BASE}/media/images`);
+    const res = await fetchWithTimeout(`${API_BASE}/media/images`, {}, 8000);
     if (res.ok) {
-      return await res.json();
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
     }
   } catch (err) {
-    console.warn("Failed to fetch images:", err);
+    console.warn("Failed to fetch images:", err.message);
   }
   return [];
 }
 
 /**
- * Fetches video recordings (both Original and Enhanced variants).
+ * Fetches real video recordings (both Original and Enhanced variants).
  */
 export async function fetchFootage() {
   try {
-    const res = await fetch(`${API_BASE}/media/footage`);
+    const res = await fetchWithTimeout(`${API_BASE}/media/footage`, {}, 8000);
     if (res.ok) {
-      return await res.json();
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
     }
   } catch (err) {
-    console.warn("Failed to fetch recordings:", err);
+    console.warn("Failed to fetch recordings:", err.message);
   }
   return [];
 }
@@ -106,39 +130,39 @@ export async function fetchFootage() {
  */
 export async function fetchAiStatus() {
   try {
-    const res = await fetch(`${API_BASE}/ai/status`);
+    const res = await fetchWithTimeout(`${API_BASE}/ai/status`, {}, 5000);
     if (res.ok) {
       return await res.json();
     }
   } catch (err) {
-    console.warn("Failed to fetch AI status:", err);
+    console.warn("Failed to fetch AI status:", err.message);
   }
   return null;
 }
 
 /**
- * Fetches live stream status (true FPS, resolution, online/standby).
+ * Fetches live stream status (true FPS, resolution, camera_status).
  */
 export async function fetchStreamStatus() {
   try {
-    const res = await fetch(`${API_BASE}/stream/status`);
+    const res = await fetchWithTimeout(`${API_BASE}/stream/status`, {}, 5000);
     if (res.ok) {
       return await res.json();
     }
   } catch (err) {
-    console.warn("Failed to fetch stream status:", err);
+    // Stream status unavailable
   }
   return null;
 }
 
 /**
- * Dispatches still frame snapshot command to edge Raspberry Pi node.
+ * Dispatches still frame capture command to edge Raspberry Pi node.
  */
 export async function triggerSnapshot() {
-  const res = await fetch(`${API_BASE}/device/commands/capture`, {
+  const res = await fetchWithTimeout(`${API_BASE}/device/commands/capture`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-  });
+  }, 10000);
   if (!res.ok) {
     throw new Error(`Capture command error: ${res.statusText}`);
   }
@@ -149,11 +173,11 @@ export async function triggerSnapshot() {
  * Dispatches start/stop recording command to edge Raspberry Pi node.
  */
 export async function toggleRecording(isRecording) {
-  const res = await fetch(`${API_BASE}/device/commands/record`, {
+  const res = await fetchWithTimeout(`${API_BASE}/device/commands/record`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ recording: isRecording }),
-  });
+  }, 10000);
   if (!res.ok) {
     throw new Error(`Record command error: ${res.statusText}`);
   }
