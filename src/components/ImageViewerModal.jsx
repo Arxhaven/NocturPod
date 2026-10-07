@@ -8,6 +8,7 @@ import {
   Clock,
   AlertCircle
 } from 'lucide-react';
+import { resolveMediaUrl } from '../services/api';
 import './ImageViewerModal.css';
 
 export default function ImageViewerModal({ image, onClose }) {
@@ -15,8 +16,10 @@ export default function ImageViewerModal({ image, onClose }) {
 
   if (!image) return null;
 
-  const originalUrl = image.original_url || image.url;
-  const enhancedUrl = image.enhanced_url || image.thumbnail_url || image.thumbnail;
+  const rawOriginalUrl = image.original_url || image.url;
+  const rawEnhancedUrl = image.enhanced_url || image.thumbnail_url || image.thumbnail;
+  const originalUrl = resolveMediaUrl(rawOriginalUrl);
+  const enhancedUrl = resolveMediaUrl(rawEnhancedUrl);
   const isEnhancedReady = image.processing_status === 'COMPLETE' && enhancedUrl;
   const isEnhancing = image.processing_status === 'PROCESSING' || image.processing_status === 'PENDING';
 

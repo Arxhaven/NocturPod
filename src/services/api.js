@@ -3,8 +3,20 @@
  * Connects frontend to the production backend specified by VITE_API_URL.
  */
 
-export const BACKEND_HOST = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
-export const API_BASE = BACKEND_HOST ? `${BACKEND_HOST}/api` : '/api';
+export const BACKEND_HOST =
+  (import.meta.env.VITE_API_URL || 'https://nocturpod-njsi.onrender.com')
+    .replace(/\/$/, '');
+export const API_BASE = `${BACKEND_HOST}/api`;
+
+export function resolveMediaUrl(url) {
+  if (!url) return null;
+
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return url;
+  }
+
+  return `${BACKEND_HOST}${url.startsWith('/') ? '' : '/'}${url}`;
+}
 
 /**
  * Checks backend and edge device connectivity status.

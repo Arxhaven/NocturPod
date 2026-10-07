@@ -8,6 +8,7 @@ import {
   Clock,
   AlertCircle
 } from 'lucide-react';
+import { resolveMediaUrl } from '../services/api';
 import './VideoPlayerModal.css';
 
 export default function VideoPlayerModal({ video, onClose }) {
@@ -15,8 +16,10 @@ export default function VideoPlayerModal({ video, onClose }) {
 
   if (!video) return null;
 
-  const originalUrl = video.original_url || video.videoUrl;
-  const enhancedUrl = video.enhanced_url;
+  const rawOriginalUrl = video.original_url || video.videoUrl;
+  const rawEnhancedUrl = video.enhanced_url;
+  const originalUrl = resolveMediaUrl(rawOriginalUrl);
+  const enhancedUrl = resolveMediaUrl(rawEnhancedUrl);
   const isEnhancedReady = video.processing_status === 'COMPLETE' && enhancedUrl;
   const isEnhancing = video.processing_status === 'PROCESSING' || video.processing_status === 'PENDING';
 

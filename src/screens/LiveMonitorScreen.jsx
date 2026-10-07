@@ -38,7 +38,7 @@ export default function LiveMonitorScreen({
             <div className="panel-head">
               <div className="panel-title-wrap">
                 <span className="panel-title">LIVE CAMERA NODE</span>
-                <span className="panel-sub mono">{deviceStatus?.id || 'nocturpod-edge-01'}</span>
+                <span className="panel-sub mono">{deviceStatus?.device_id || deviceStatus?.id || 'nocturpod-edge-01'}</span>
               </div>
               <StatusBadge status={isOnline ? 'ONLINE' : 'OFFLINE'} size="small" />
             </div>

@@ -336,8 +336,9 @@ def check_device_timeouts(timeout_seconds: int = 15) -> None:
     now = datetime.datetime.now(datetime.timezone.utc)
     cutoff = (now - datetime.timedelta(seconds=timeout_seconds)).isoformat()
     if has_supabase_config():
+        encoded_cutoff = urllib.parse.quote(cutoff)
         _supabase_request(
-            f"devices?last_heartbeat=lt.{cutoff}&status=neq.OFFLINE",
+            f"devices?last_heartbeat=lt.{encoded_cutoff}&status=neq.OFFLINE",
             method="PATCH",
             data={"status": "OFFLINE", "camera_status": "OFFLINE"}
         )

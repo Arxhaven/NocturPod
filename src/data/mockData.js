@@ -5,6 +5,8 @@
  */
 
 export const EMPTY_DEVICE_STATUS = {
+  device_id: "nocturpod-edge-01",
+  device_name: "NocturPod Alpha-1",
   id: "nocturpod-edge-01",
   name: "NocturPod Alpha-1",
   hardware_model: "Raspberry Pi 4 Model B 8GB",
