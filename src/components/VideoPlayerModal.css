@@ -151,6 +151,25 @@
   color: #52c41a;
 }
 
+.v-btn.delete-btn {
+  border-color: rgba(255, 77, 79, 0.4);
+  color: #ff7875;
+}
+
+.v-btn.delete-btn:hover {
+  background: rgba(114, 38, 42, 0.7);
+  border-color: #ff7875;
+  color: #fff;
+}
+
+.v-btn.delete-btn.confirm {
+  background: #ff4d4f;
+  border-color: #ff4d4f;
+  color: #fff;
+  font-weight: 700;
+  animation: pulse-ring 1.2s infinite alternate;
+}
+
 .v-close-btn {
   width: 32px;
   height: 32px;

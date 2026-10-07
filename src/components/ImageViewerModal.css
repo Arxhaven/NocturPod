@@ -153,6 +153,25 @@
   color: #52c41a;
 }
 
+.viewer-btn.delete-btn {
+  border-color: rgba(255, 77, 79, 0.4);
+  color: #ff7875;
+}
+
+.viewer-btn.delete-btn:hover {
+  background: rgba(114, 38, 42, 0.7);
+  border-color: #ff7875;
+  color: #fff;
+}
+
+.viewer-btn.delete-btn.confirm {
+  background: #ff4d4f;
+  border-color: #ff4d4f;
+  color: #fff;
+  font-weight: 700;
+  animation: pulse-ring 1.2s infinite alternate;
+}
+
 .viewer-close-btn {
   width: 32px;
   height: 32px;

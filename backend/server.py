@@ -35,6 +35,8 @@ from backend.database import (
     queue_command,
     record_detection,
     record_media_asset,
+    delete_all_events,
+    delete_event,
     update_event_status,
     upload_to_supabase_storage,
     upsert_device_heartbeat,
@@ -442,6 +444,20 @@ def complete_event(event_id: str):
         return jsonify({"error": "Unauthorized"}), 401
     update_event_status(event_id, status="COMPLETE")
     return jsonify({"status": "SUCCESS", "event_id": event_id})
+
+
+@app.delete("/api/events/<event_id>")
+def delete_single_event_route(event_id: str):
+    success = delete_event(event_id)
+    if not success:
+        return jsonify({"error": "Failed to delete event"}), 500
+    return jsonify({"status": "DELETED", "event_id": event_id})
+
+
+@app.delete("/api/events")
+def delete_all_events_route():
+    count = delete_all_events()
+    return jsonify({"status": "DELETED_ALL", "count": count})
 
 
 @app.get("/api/media/images")

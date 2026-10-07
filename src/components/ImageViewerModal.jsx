@@ -6,13 +6,15 @@ import {
   Image as ImageIcon,
   CheckCircle2,
   Clock,
-  AlertCircle
+  AlertCircle,
+  Trash2
 } from 'lucide-react';
 import { resolveMediaUrl } from '../services/api';
 import './ImageViewerModal.css';
 
-export default function ImageViewerModal({ image, onClose }) {
+export default function ImageViewerModal({ image, onClose, onDelete }) {
   const [viewMode, setViewMode] = useState('ENHANCED'); // 'ENHANCED' or 'ORIGINAL'
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   if (!image) return null;
 
@@ -91,6 +93,24 @@ export default function ImageViewerModal({ image, onClose }) {
                 <Download size={14} />
                 <span>ENHANCED</span>
               </a>
+            )}
+
+            {/* Delete Button */}
+            {onDelete && (
+              <button
+                className={`viewer-btn delete-btn mono ${confirmDelete ? 'confirm' : ''}`}
+                onClick={() => {
+                  if (!confirmDelete) {
+                    setConfirmDelete(true);
+                  } else {
+                    onDelete(image.event_id || image.id);
+                  }
+                }}
+                title={confirmDelete ? "Click again to permanently delete" : "Delete capture"}
+              >
+                <Trash2 size={14} />
+                <span>{confirmDelete ? "CONFIRM DELETE?" : "DELETE"}</span>
+              </button>
             )}
 
             <button className="viewer-close-btn" onClick={onClose} aria-label="Close modal">

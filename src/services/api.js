@@ -183,3 +183,29 @@ export async function toggleRecording(isRecording) {
   }
   return await res.json();
 }
+
+/**
+ * Deletes a single capture/recording event and associated media files.
+ */
+export async function deleteEvent(eventId) {
+  const res = await fetchWithTimeout(`${API_BASE}/events/${eventId}`, {
+    method: 'DELETE',
+  }, 10000);
+  if (!res.ok) {
+    throw new Error(`Delete event error: ${res.statusText}`);
+  }
+  return await res.json();
+}
+
+/**
+ * Deletes all events and associated media files.
+ */
+export async function deleteAllEvents() {
+  const res = await fetchWithTimeout(`${API_BASE}/events`, {
+    method: 'DELETE',
+  }, 15000);
+  if (!res.ok) {
+    throw new Error(`Delete all error: ${res.statusText}`);
+  }
+  return await res.json();
+}

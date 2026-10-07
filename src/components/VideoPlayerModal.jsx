@@ -6,13 +6,15 @@ import {
   Film,
   CheckCircle2,
   Clock,
-  AlertCircle
+  AlertCircle,
+  Trash2
 } from 'lucide-react';
 import { resolveMediaUrl } from '../services/api';
 import './VideoPlayerModal.css';
 
-export default function VideoPlayerModal({ video, onClose }) {
+export default function VideoPlayerModal({ video, onClose, onDelete }) {
   const [viewMode, setViewMode] = useState('ENHANCED'); // 'ENHANCED' or 'ORIGINAL'
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   if (!video) return null;
 
@@ -76,7 +78,6 @@ export default function VideoPlayerModal({ video, onClose }) {
               </a>
             )}
 
-            {/* Download Enhanced */}
             {enhancedUrl && isEnhancedReady && (
               <a 
                 href={enhancedUrl} 
@@ -89,7 +90,25 @@ export default function VideoPlayerModal({ video, onClose }) {
               </a>
             )}
 
-            <button className="v-close-btn" onClick={onClose}>
+            {/* Delete Button */}
+            {onDelete && (
+              <button
+                className={`v-btn delete-btn mono ${confirmDelete ? 'confirm' : ''}`}
+                onClick={() => {
+                  if (!confirmDelete) {
+                    setConfirmDelete(true);
+                  } else {
+                    onDelete(video.event_id || video.id);
+                  }
+                }}
+                title={confirmDelete ? "Click again to permanently delete" : "Delete recording"}
+              >
+                <Trash2 size={14} />
+                <span>{confirmDelete ? "CONFIRM DELETE?" : "DELETE"}</span>
+              </button>
+            )}
+
+            <button className="v-close-btn" onClick={onClose} aria-label="Close modal">
               <X size={18} />
             </button>
           </div>

@@ -124,6 +124,27 @@ def upload_to_supabase_storage(local_path: Path | str, storage_path: str, conten
         return False
 
 
+def delete_from_supabase_storage(storage_paths: list[str]) -> bool:
+    """Deletes multiple files from the Supabase Storage bucket."""
+    if not has_supabase_config() or not storage_paths:
+        return False
+
+    url = f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_STORAGE_BUCKET}"
+    req_headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json"
+    }
+    body = json.dumps({"prefixes": [p.lstrip('/') for p in storage_paths if p]}).encode("utf-8")
+    req = urllib.request.Request(url, data=body, headers=req_headers, method="DELETE")
+    try:
+        with urllib.request.urlopen(req, timeout=15.0) as resp:
+            return resp.status in (200, 204)
+    except Exception as e:
+        print(f"[Supabase Storage] Delete error: {e}")
+        return False
+
+
 # -----------------------------------------------------------------------------
 # Local Fallback SQLite Initialization
 # -----------------------------------------------------------------------------
@@ -541,6 +562,63 @@ def list_media_events(media_type: str = "IMAGE") -> list[dict[str, Any]]:
     target_type = "MANUAL_CAPTURE" if media_type == "IMAGE" else "VIDEO_RECORDING"
     events = list_events(limit=100, filter_type=target_type)
     return events
+
+
+def delete_event(event_id: str) -> bool:
+    """Deletes an event, associated media assets, detections, and storage files."""
+    storage_paths: list[str] = []
+
+    if has_supabase_config():
+        assets = _supabase_request(f"media_assets?event_id=eq.{event_id}") or []
+        for a in assets:
+            if a.get("storage_path"):
+                storage_paths.append(a["storage_path"])
+        if storage_paths:
+            delete_from_supabase_storage(storage_paths)
+        _supabase_request(f"events?event_id=eq.{event_id}", method="DELETE")
+
+    # Clean up local SQLite fallback if used
+    with _LOCK, _get_local_connection() as conn:
+        asset_rows = conn.execute("SELECT storage_path FROM media_assets WHERE event_id = ?", (event_id,)).fetchall()
+        for r in asset_rows:
+            p = r["storage_path"]
+            if p:
+                storage_paths.append(p)
+        conn.execute("DELETE FROM detections WHERE event_id = ?", (event_id,))
+        conn.execute("DELETE FROM media_assets WHERE event_id = ?", (event_id,))
+        conn.execute("DELETE FROM events WHERE event_id = ?", (event_id,))
+        conn.commit()
+
+    # Clean local disk files matching event_id
+    media_dir = Path("storage") / "media"
+    if media_dir.exists():
+        for f in media_dir.glob(f"{event_id}*"):
+            try:
+                f.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    log_system_event("INFO", "DASHBOARD", f"Deleted event {event_id} and associated assets")
+    return True
+
+
+def delete_all_events() -> int:
+    """Deletes all events, media assets, detections, and storage files."""
+    deleted_count = 0
+    if has_supabase_config():
+        evs = _supabase_request("events?select=event_id") or []
+        deleted_count = len(evs)
+        for e in evs:
+            eid = e.get("event_id")
+            if eid:
+                delete_event(eid)
+    else:
+        with _LOCK, _get_local_connection() as conn:
+            rows = conn.execute("SELECT event_id FROM events").fetchall()
+            deleted_count = len(rows)
+            for r in rows:
+                delete_event(r["event_id"])
+    return deleted_count
 
 
 # -----------------------------------------------------------------------------

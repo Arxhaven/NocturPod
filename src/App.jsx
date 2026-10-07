@@ -19,7 +19,8 @@ import {
   fetchImages, 
   fetchFootage, 
   triggerSnapshot, 
-  toggleRecording
+  toggleRecording,
+  deleteEvent
 } from './services/api';
 import './App.css';
 
@@ -180,6 +181,22 @@ export default function App() {
     }
   };
 
+  // Delete event and associated media
+  const handleDeleteEvent = async (eventId) => {
+    try {
+      showToast(`Deleting ${eventId}...`);
+      await deleteEvent(eventId);
+      showToast(`Capture ${eventId} deleted successfully`);
+      setSelectedImage(null);
+      setSelectedVideo(null);
+      setImages(prev => prev.filter(item => (item.event_id || item.id) !== eventId));
+      setFootage(prev => prev.filter(item => (item.event_id || item.id) !== eventId));
+      setEvents(prev => prev.filter(item => (item.event_id || item.id) !== eventId));
+    } catch (err) {
+      showToast(`Delete failed: ${err.message}`, true);
+    }
+  };
+
   return (
     <div className="app-shell">
       <LiveBackground />
@@ -287,6 +304,7 @@ export default function App() {
         <ImageViewerModal 
           image={selectedImage}
           onClose={() => setSelectedImage(null)}
+          onDelete={handleDeleteEvent}
         />
       )}
 
@@ -294,6 +312,7 @@ export default function App() {
         <VideoPlayerModal 
           video={selectedVideo}
           onClose={() => setSelectedVideo(null)}
+          onDelete={handleDeleteEvent}
         />
       )}
     </div>
