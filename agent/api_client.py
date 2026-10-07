@@ -24,6 +24,7 @@ class NocturPodApiClient:
     def send_heartbeat(self, telemetry: dict[str, Any]) -> bool:
         url = f"{self.backend_url}/api/device/heartbeat"
         try:
+<<<<<<< ours
             res = self.session.post(url, json=telemetry, timeout=5.0)
             if res.status_code == 200:
                 print(f"[Heartbeat] -> OK (Status: {telemetry.get('status')}, Temp: {telemetry.get('cpu_temp_c')}°C)")
@@ -34,6 +35,16 @@ class NocturPodApiClient:
         except Exception as e:
             print(f"[Heartbeat] -> Connection error contacting {url}: {e}")
             return False
+=======
+            res = self.session.post(
+                f"{self.backend_url}/api/device/heartbeat",
+                json=telemetry,
+                timeout=4.0
+            )
+            return res.status_code == 200
+        except Exception as e:
+            print("[Stream] ERROR:", e); return False
+>>>>>>> theirs
 
     def poll_commands(self) -> list[dict[str, Any]]:
         try:
@@ -43,12 +54,16 @@ class NocturPodApiClient:
             )
             if res.status_code == 200:
                 data = res.json()
+<<<<<<< ours
                 cmds = data.get("commands", [])
                 if cmds:
                     print(f"[Commands] Received {len(cmds)} command(s)")
                 return cmds
             elif res.status_code == 401:
                 print("[Commands] Unauthorized: Check NOCTURPOD_DEVICE_TOKEN match with Render backend")
+=======
+                return data.get("commands", [])
+>>>>>>> theirs
         except Exception as e:
             pass
         return []
@@ -64,8 +79,8 @@ class NocturPodApiClient:
                 timeout=4.0
             )
             return res.status_code == 200
-        except Exception:
-            return False
+        except Exception as e:
+            print("[Stream] ERROR:", e); return False
 
     def push_stream_frame(self, jpeg_bytes: bytes) -> bool:
         try:
@@ -76,12 +91,12 @@ class NocturPodApiClient:
                 timeout=2.0
             )
             return res.status_code == 200
-        except Exception:
-            return False
+        except Exception as e:
+            print("[Stream] ERROR:", e); return False
 
     def upload_media(self, file_path: Path, event_id: str, media_type: str, duration: str = "0s") -> bool:
         if not file_path.exists():
-            return False
+            print("[Stream] ERROR:", e); return False
         try:
             mime = "image/jpeg" if media_type == "IMAGE" else "video/mp4"
             with open(file_path, "rb") as f:
@@ -106,4 +121,4 @@ class NocturPodApiClient:
                     return False
         except Exception as e:
             print(f"[API Client] Media upload failed for {file_path.name}: {e}")
-            return False
+            print("[Stream] ERROR:", e); return False

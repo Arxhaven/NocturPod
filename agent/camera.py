@@ -28,7 +28,7 @@ class OV5647Camera:
     def _init_camera(self) -> None:
         # 1. Try modern Picamera2 (recommended on Raspberry Pi OS Bookworm / Bullseye)
         try:
-            from picam2 import Picamera2
+            from picamera2 import Picamera2
             self.picam2 = Picamera2()
             config = self.picam2.create_video_configuration(main={"size": (self.width, self.height), "format": "RGB888"})
             self.picam2.configure(config)
