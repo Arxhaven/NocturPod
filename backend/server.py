@@ -16,6 +16,7 @@ from typing import Any, Generator
 import cv2
 import numpy as np
 from flask import Flask, Response, jsonify, request, send_from_directory
+from flask_cors import CORS
 
 from backend.ai_engine import ENGINE, enhance_image, enhance_video
 from backend.database import (
@@ -45,6 +46,23 @@ MEDIA_DIR = STORAGE_DIR / "media"
 MEDIA_DIR.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__, static_folder=str(MEDIA_DIR))
+
+CORS(
+    app,
+    resources={
+        r"/api/*": {
+            "origins": [
+                "https://noctur-pod.vercel.app"
+            ],
+            "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            "allow_headers": [
+                "Content-Type",
+                "Authorization",
+                "X-Device-Token"
+            ]
+        }
+    }
+)
 
 # Device authorization token from environment
 DEVICE_AUTH_TOKEN = os.getenv("NOCTURPOD_DEVICE_TOKEN", "nocturpod-sec-key-replace-with-secure-token")
