@@ -103,12 +103,23 @@
   letter-spacing: 0.08em;
 }
 
+.live-pill.online {
+  background: rgba(82, 196, 26, 0.2);
+  border-color: rgba(82, 196, 26, 0.5);
+  color: #52c41a;
+}
+
 .live-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #ff4d4f;
+  background: #52c41a;
   animation: pulse-ring 1.6s infinite ease-out;
+}
+
+.live-dot.inactive {
+  background: #ff4d4f;
+  animation: none;
 }
 
 .hud-data {

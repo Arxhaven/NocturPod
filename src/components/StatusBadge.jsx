@@ -19,6 +19,8 @@ export default function StatusBadge({ status = 'ONLINE', size = 'normal', pulse 
         return 'status-processing';
       case 'WARNING':
       case 'STORED_FOR_INSPECTION':
+      case 'UNVERIFIED':
+      case 'UNKNOWN':
         return 'status-warning';
       case 'OFFLINE':
       case 'ERROR':

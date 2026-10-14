@@ -11,46 +11,46 @@ import {
   Upload, 
   FileCheck,
   TrendingUp,
-  Sliders
+  Sliders,
+  RefreshCw
 } from 'lucide-react';
 import { detectObjects } from '../services/api';
+import { runEdgeInference } from '../utils/aiInference';
 import './AIScreen.css';
 
-export default function AIScreen({ aiSummary }) {
+export default function AIScreen({ aiSummary, isDemoMode = false }) {
   const [selectedFile, setSelectedFile] = useState(null);
   const [isInferencing, setIsInferencing] = useState(false);
   const [inferenceResult, setInferenceResult] = useState(null);
   const [apiError, setApiError] = useState(null);
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files?.[0];
+  const executeInference = async (file) => {
     if (!file) return;
-    setSelectedFile(file);
     setIsInferencing(true);
     setApiError(null);
     setInferenceResult(null);
 
     try {
-      // Call existing Python API server /detect endpoint
-      const result = await detectObjects(file);
+      const result = await runEdgeInference(file, detectObjects);
       setInferenceResult(result);
     } catch (err) {
-      console.warn("Backend not running or failed, simulating edge inference output:", err);
-      // Clean fallback showing how the backend structure is represented
-      setTimeout(() => {
-        setInferenceResult({
-          objects: [
-            { label: "person", confidence: 0.9382, box: [120, 60, 410, 520] },
-            { label: "bicycle", confidence: 0.8715, box: [340, 220, 510, 480] }
-          ],
-          count: 2,
-          simulated: true
-        });
-        setIsInferencing(false);
-      }, 700);
-      return;
+      setApiError(err?.message || 'Edge detection request failed. Ensure API server is running on :5000.');
+    } finally {
+      setIsInferencing(false);
     }
-    setIsInferencing(false);
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setSelectedFile(file);
+    executeInference(file);
+  };
+
+  const handleRetry = () => {
+    if (selectedFile) {
+      executeInference(selectedFile);
+    }
   };
 
   return (
@@ -60,7 +60,12 @@ export default function AIScreen({ aiSummary }) {
         <div className="ai-strip-col">
           <div className="ai-strip-head">
             <span className="strip-title">YOLOV8N LOW-LIGHT VISION PIPELINE</span>
-            <StatusBadge status="READY" size="small" />
+            <StatusBadge status={isDemoMode ? "READY" : (aiSummary?.processingStatus ?? "READY")} size="small" />
+            {isDemoMode && (
+              <span className="mono demo-badge" style={{ fontSize: '10px', padding: '2px 6px', background: 'rgba(250, 173, 20, 0.2)', border: '1px solid #faad14', borderRadius: '4px', color: '#faad14' }}>
+                DEMO SUMMARY
+              </span>
+            )}
           </div>
           <span className="strip-meta mono">
             NCNN QUANTIZED INT8 • ADAPTIVE CLAHE LUM ENHANCE • ASYNC SQLITE EVIDENCE LOGGING
@@ -70,19 +75,19 @@ export default function AIScreen({ aiSummary }) {
         <div className="ai-metrics-row">
           <div className="ai-met-item">
             <span className="met-label mono">PROCESSING STATUS</span>
-            <span className="met-val mono active">{aiSummary?.processingStatus ?? 'COMPLETE'}</span>
+            <span className="met-val mono active">{aiSummary?.processingStatus ?? 'READY'}</span>
           </div>
           <div className="ai-met-item">
             <span className="met-label mono">INFERENCE LATENCY</span>
-            <span className="met-val mono">{aiSummary?.latencyMs ?? 38} ms</span>
+            <span className="met-val mono">{aiSummary?.latencyMs != null ? `${aiSummary.latencyMs} ms` : 'N/A'}</span>
           </div>
           <div className="ai-met-item">
             <span className="met-label mono">ANALYZED TODAY</span>
-            <span className="met-val mono">{aiSummary?.totalAnalyzedToday ?? 73} FRAMES</span>
+            <span className="met-val mono">{aiSummary?.totalAnalyzedToday != null ? `${aiSummary.totalAnalyzedToday} FRAMES` : '0 FRAMES'}</span>
           </div>
           <div className="ai-met-item">
             <span className="met-label mono">CLAHE ADAPTIVE CLIP</span>
-            <span className="met-val mono">{aiSummary?.claheClipLimit ?? '1.8 - 2.5'}</span>
+            <span className="met-val mono">{aiSummary?.claheClipLimit ?? '2.2 (Default)'}</span>
           </div>
         </div>
       </div>
@@ -147,12 +152,14 @@ export default function AIScreen({ aiSummary }) {
           </div>
 
           <p className="test-desc">
-            Test custom drone or night surveillance images directly against the YOLOv8n detector with adaptive CLAHE preprocessing.
+            Test custom drone or night surveillance images directly against the edge YOLOv8n detector with adaptive CLAHE preprocessing.
           </p>
 
           <label className="upload-dropzone">
             <Upload size={24} className="upload-icon" />
-            <span className="upload-text">DRAG & DROP IMAGE OR CLICK TO BROWSE</span>
+            <span className="upload-text">
+              {selectedFile ? `SELECTED: ${selectedFile.name}` : 'DRAG & DROP IMAGE OR CLICK TO BROWSE'}
+            </span>
             <span className="upload-sub mono">Supports JPG, PNG (RGB or Greyscale IR)</span>
             <input 
               type="file" 
@@ -169,6 +176,47 @@ export default function AIScreen({ aiSummary }) {
             </div>
           )}
 
+          {apiError && (
+            <div 
+              className="api-error-banner mono" 
+              style={{ 
+                color: '#ff7875', 
+                padding: '12px 14px', 
+                background: 'rgba(255, 77, 79, 0.12)', 
+                border: '1px solid rgba(255, 77, 79, 0.3)', 
+                borderRadius: '6px', 
+                margin: '14px 0', 
+                fontSize: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '10px'
+              }}
+            >
+              <span>⚠ INFERENCE ERROR: {apiError}</span>
+              <button 
+                type="button" 
+                onClick={handleRetry}
+                className="mono"
+                style={{
+                  background: 'rgba(255, 77, 79, 0.25)',
+                  border: '1px solid #ff7875',
+                  color: '#fff',
+                  padding: '5px 10px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  fontSize: '11px'
+                }}
+              >
+                <RefreshCw size={11} />
+                <span>RETRY</span>
+              </button>
+            </div>
+          )}
+
           {inferenceResult && (
             <div className="inference-result-box">
               <div className="res-header">
@@ -176,25 +224,25 @@ export default function AIScreen({ aiSummary }) {
                 <span className="res-count mono">{inferenceResult.count} OBJECT(S) FOUND</span>
               </div>
 
-              {inferenceResult.simulated && (
-                <div className="simulated-pill mono">
-                  NOTE: PYTHON SERVER ON :5000 NOT DETECTED — SIMULATING REAL YOLOV8 OUTPUT SCHEMA
+              {inferenceResult.count === 0 ? (
+                <div className="no-detections mono" style={{ padding: '16px', color: 'var(--color-muted-sage)', fontSize: '13px' }}>
+                  No target classifications matched confidence threshold (&gt; 0.30).
+                </div>
+              ) : (
+                <div className="detected-objects-list">
+                  {inferenceResult.objects?.map((obj, i) => (
+                    <div key={i} className="detected-obj-item">
+                      <div className="obj-main mono">
+                        <span className="obj-label">{obj.label.toUpperCase()}</span>
+                        <span className="obj-conf">{(obj.confidence * 100).toFixed(2)}%</span>
+                      </div>
+                      <div className="obj-box mono">
+                        BOUNDING BOX: [{Array.isArray(obj.box) ? obj.box.join(', ') : 'N/A'}]
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
-
-              <div className="detected-objects-list">
-                {inferenceResult.objects?.map((obj, i) => (
-                  <div key={i} className="detected-obj-item">
-                    <div className="obj-main mono">
-                      <span className="obj-label">{obj.label.toUpperCase()}</span>
-                      <span className="obj-conf">{(obj.confidence * 100).toFixed(2)}%</span>
-                    </div>
-                    <div className="obj-box mono">
-                      BOUNDING BOX: [{obj.box.join(', ')}]
-                    </div>
-                  </div>
-                ))}
-              </div>
             </div>
           )}
         </div>

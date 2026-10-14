@@ -6,65 +6,297 @@ import {
   Circle, 
   Volume2, 
   VolumeX, 
-  Sliders, 
-  Eye, 
   Sparkles,
-  Zap,
-  Info
+  RefreshCw,
+  VideoOff,
+  Radio
 } from 'lucide-react';
 import StatusBadge from './StatusBadge';
+import { getStreamUrl, fetchStreamStatus, isRecordingSupported } from '../services/api';
 import './LivePlayer.css';
 
 export default function LivePlayer({ 
   onSnapshot, 
-  isRecording, 
+  isCapturing = false,
+  isRecording = false, 
   onToggleRecording, 
   claheActive = true, 
   onToggleClahe,
-  irNightMode = 'AUTO_ACTIVE' 
+  irNightMode = 'AUTO_ACTIVE',
+  deviceStatus,
+  onShowToast
 }) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
-  const [fps, setFps] = useState(24);
+  const [fps, setFps] = useState(deviceStatus?.streamFps ?? 0);
   const [hudTimestamp, setHudTimestamp] = useState('');
+  const [streamInfo, setStreamInfo] = useState(null);
   const containerRef = useRef(null);
+
+  // Streaming lifecycle states
+  const isOnline = deviceStatus?.status === 'ONLINE';
+  const [streamPath, setStreamPath] = useState('/api/stream/live');
+  const [streamKey, setStreamKey] = useState(Date.now());
+  const [streamState, setStreamState] = useState('checking');
+
+  // Check stream status from backend
+  const checkStream = async () => {
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      return;
+    }
+    try {
+      const statusData = await fetchStreamStatus();
+      if (statusData) {
+        setStreamInfo(statusData);
+        if (statusData.fps != null) setFps(statusData.fps);
+
+        if (statusData.camera_status === 'ONLINE' || statusData.status === 'ACTIVE' || statusData.status === 'STREAMING') {
+          if (streamState !== 'streaming' && streamState !== 'loading') {
+            setStreamState('loading');
+            setStreamKey(Date.now());
+          }
+        } else if (statusData.status === 'WAITING_FOR_CAMERA' || statusData.camera_status === 'OFFLINE') {
+          setStreamState('waiting');
+        }
+      } else if (!isOnline) {
+        setStreamState('offline');
+      }
+    } catch {
+      // Fallback
+    }
+  };
+
+  useEffect(() => {
+    checkStream();
+    const timer = setInterval(checkStream, 12000);
+    return () => clearInterval(timer);
+  }, [isOnline]);
 
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
       setHudTimestamp(now.toTimeString().split(' ')[0] + '.' + String(Math.floor(now.getMilliseconds() / 100)));
     };
-    const timer = setInterval(updateTime, 100);
+    updateTime();
+    const timer = setInterval(updateTime, 500);
     return () => clearInterval(timer);
   }, []);
 
   const handleFullscreenToggle = () => {
     if (!containerRef.current) return;
     if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen?.().catch(console.error);
+      containerRef.current.requestFullscreen?.().catch(() => {});
       setIsFullscreen(true);
     } else {
-      document.exitFullscreen?.().catch(console.error);
+      document.exitFullscreen?.().catch(() => {});
       setIsFullscreen(false);
     }
   };
 
+  const handleStreamError = () => {
+    // If stream fails, check if camera is offline on backend
+    if (streamInfo?.status === 'WAITING_FOR_CAMERA' || streamInfo?.camera_status === 'OFFLINE') {
+      setStreamState('waiting');
+    } else if (streamPath === '/api/stream/live') {
+      // Try fallback to /stream
+      setStreamPath('/stream');
+      setStreamKey(Date.now());
+    } else {
+      setStreamState('error');
+    }
+  };
+
+  const handleReconnectStream = () => {
+    setStreamState('loading');
+    setStreamKey(Date.now());
+    checkStream();
+  };
+
+  const handleRecordClick = () => {
+    if (!isRecordingSupported()) {
+      if (onShowToast) {
+        onShowToast("Edge recording not supported on current backend.");
+      }
+      return;
+    }
+    if (onToggleRecording) {
+      onToggleRecording();
+    }
+  };
+
+  const currentStreamUrl = (streamState === 'loading' || streamState === 'streaming')
+    ? `${getStreamUrl(streamPath)}?_cb=${streamKey}`
+    : '';
+
   return (
     <div className={`live-player-wrapper ${isFullscreen ? 'fullscreen-mode' : ''}`} ref={containerRef}>
       <div className="player-inner">
-        {/* Real video feed or simulated stream with low-light camera aesthetic */}
         <div className="video-stream-container">
-          <video 
-            className={`live-video-element ${claheActive ? 'clahe-filter-enhanced' : ''}`}
-            autoPlay 
-            loop 
-            muted={isMuted} 
-            playsInline
-            poster="https://images.unsplash.com/photo-1509114397022-ed747cca3f65?auto=format&fit=crop&w=1200&q=80"
-          >
-            {/* High quality night ambient footage */}
-            <source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4" type="video/mp4" />
-          </video>
+          {/* Live MJPEG Optical Feed */}
+          {(streamState === 'streaming' || streamState === 'loading') && (
+            <img 
+              key={`${streamPath}-${streamKey}`}
+              src={currentStreamUrl}
+              alt="NocturPod Live Optical Feed"
+              className={`live-video-element ${claheActive ? 'clahe-filter-enhanced' : ''}`}
+              onLoad={() => setStreamState('streaming')}
+              onError={handleStreamError}
+              style={{ 
+                display: streamState === 'streaming' ? 'block' : 'none',
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover'
+              }}
+            />
+          )}
+
+          {/* Loading Indicator */}
+          {streamState === 'loading' && (
+            <div 
+              className="stream-loading-overlay mono"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '12px',
+                background: '#041213',
+                color: 'var(--color-muted-sage)',
+                zIndex: 2
+              }}
+            >
+              <RefreshCw size={28} className="spin-icon" style={{ opacity: 0.8 }} />
+              <span style={{ fontSize: '12px', letterSpacing: '0.08em' }}>
+                CONNECTING OPTICAL STREAM ({streamPath})...
+              </span>
+            </div>
+          )}
+
+          {/* Standby / Waiting for Camera Screen */}
+          {streamState === 'waiting' && (
+            <div 
+              className="stream-offline-screen mono"
+              style={{
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '12px',
+                background: 'radial-gradient(circle, rgba(11, 43, 38, 0.6) 0%, rgba(4, 18, 19, 0.98) 100%)',
+                color: 'var(--color-muted-sage)',
+                padding: '20px',
+                textAlign: 'center'
+              }}
+            >
+              <Radio size={36} style={{ opacity: 0.6, color: '#faad14' }} />
+              <span style={{ fontSize: '13px', letterSpacing: '0.08em', color: '#faad14', fontWeight: 600 }}>
+                WAITING FOR CAMERA STREAM
+              </span>
+              <span style={{ fontSize: '11px', maxWidth: '440px', lineHeight: 1.5, opacity: 0.85 }}>
+                Cloud gateway is online, but edge camera is currently {streamInfo?.camera_status || 'OFFLINE'} ({streamInfo?.status || 'WAITING_FOR_CAMERA'}). Stream will activate automatically when hardware stream frames arrive.
+              </span>
+              <button
+                type="button"
+                onClick={handleReconnectStream}
+                className="mono"
+                style={{
+                  background: 'rgba(250, 173, 20, 0.15)',
+                  border: '1px solid #faad14',
+                  color: '#faad14',
+                  padding: '6px 14px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  marginTop: '6px'
+                }}
+              >
+                <RefreshCw size={12} />
+                <span>POLL STREAM STATUS</span>
+              </button>
+            </div>
+          )}
+
+          {/* Error Screen */}
+          {streamState === 'error' && (
+            <div 
+              className="stream-error-overlay mono"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '14px',
+                background: 'radial-gradient(circle, rgba(11, 43, 38, 0.9) 0%, rgba(4, 18, 19, 0.98) 100%)',
+                color: '#ff7875',
+                zIndex: 2,
+                padding: '20px',
+                textAlign: 'center'
+              }}
+            >
+              <VideoOff size={34} style={{ opacity: 0.8 }} />
+              <span style={{ fontSize: '13px', fontWeight: 600 }}>
+                OPTICAL STREAM UNAVAILABLE
+              </span>
+              <span style={{ fontSize: '11px', color: 'var(--color-muted-sage)', maxWidth: '420px', lineHeight: 1.5 }}>
+                Could not connect to MJPEG stream endpoint ({streamPath}). Ensure the edge camera daemon is running on the Raspberry Pi.
+              </span>
+              <button
+                type="button"
+                onClick={handleReconnectStream}
+                className="mono"
+                style={{
+                  background: 'rgba(255, 77, 79, 0.2)',
+                  border: '1px solid #ff7875',
+                  color: '#fff',
+                  padding: '6px 14px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <RefreshCw size={12} />
+                <span>RECONNECT FEED</span>
+              </button>
+            </div>
+          )}
+
+          {/* Standby / Offline Screen when backend itself is unreachable */}
+          {(streamState === 'offline' || streamState === 'checking') && (
+            <div 
+              className="stream-offline-screen mono"
+              style={{
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '12px',
+                background: 'radial-gradient(circle, rgba(11, 43, 38, 0.4) 0%, rgba(4, 18, 19, 0.95) 100%)',
+                color: 'var(--color-muted-sage)'
+              }}
+            >
+              <VideoOff size={36} style={{ opacity: 0.5 }} />
+              <span style={{ fontSize: '13px', letterSpacing: '0.1em', color: 'var(--color-light-green)' }}>
+                NOCTURPOD // OPTICAL FEED STANDBY
+              </span>
+              <span style={{ fontSize: '11px', opacity: 0.6 }}>
+                OV5647 SENSOR STANDBY • AWAITING EDGE HARDWARE CONNECTION
+              </span>
+            </div>
+          )}
 
           {/* Low light night vision noise / grain overlay */}
           <div className="night-vision-grain" />
@@ -74,13 +306,17 @@ export default function LivePlayer({
             {/* Top HUD Row */}
             <div className="hud-top-bar">
               <div className="hud-group">
-                <div className="live-pill">
-                  <span className="live-dot" />
-                  <span className="mono">LIVE</span>
+                <div className={`live-pill ${streamState === 'streaming' ? 'online' : ''}`}>
+                  <span className={`live-dot ${streamState === 'streaming' ? '' : 'inactive'}`} />
+                  <span className="mono">
+                    {streamState === 'streaming' ? 'LIVE' : (streamState === 'loading' ? 'SYNC' : 'STANDBY')}
+                  </span>
                 </div>
-                <span className="hud-data mono">1920×1080</span>
-                <span className="hud-data mono">{fps} FPS</span>
-                <span className="hud-data hud-accent mono">OV5647-IR</span>
+                <span className="hud-data mono">{streamInfo?.resolution || deviceStatus?.streamResolution || '1280×720'}</span>
+                <span className="hud-data mono">{streamState === 'streaming' ? `${fps} FPS` : '0 FPS'}</span>
+                <span className="hud-data hud-accent mono">
+                  {streamInfo?.camera_status === 'ONLINE' ? 'OV5647-IR' : 'STANDBY'}
+                </span>
               </div>
 
               <div className="hud-group">
@@ -106,42 +342,35 @@ export default function LivePlayer({
                 <div className="ch-line-v" />
                 <div className="ch-box" />
               </div>
-
-              {/* Dynamic Target Acquisition Box (Simulated edge detection) */}
-              <div className="hud-detection-box">
-                <div className="detection-tag mono">
-                  <span className="tag-label">PERSON</span>
-                  <span className="tag-conf">94.2%</span>
-                </div>
-                <div className="box-corner c-tl" />
-                <div className="box-corner c-tr" />
-                <div className="box-corner c-bl" />
-                <div className="box-corner c-br" />
-              </div>
             </div>
 
             {/* Bottom HUD Controls Toolbar */}
             <div className="hud-bottom-bar">
               <div className="hud-controls-left">
+                {/* Recording Command Toggle */}
                 <button 
+                  type="button"
                   className={`hud-btn ${isRecording ? 'recording' : ''}`}
-                  onClick={onToggleRecording}
-                  title={isRecording ? "Stop edge recording" : "Start local 1080p recording"}
+                  onClick={handleRecordClick}
+                  title={isRecording ? "Stop edge recording" : "Queue edge recording command"}
                 >
                   <Circle size={14} className={isRecording ? 'recording-dot' : ''} />
-                  <span className="mono">{isRecording ? 'REC 00:14' : 'REC'}</span>
+                  <span className="mono">{isRecording ? 'STOP REC' : 'START REC'}</span>
                 </button>
 
                 <button 
+                  type="button"
                   className="hud-btn"
                   onClick={onSnapshot}
-                  title="Capture full-res snapshot and trigger AI inference"
+                  disabled={isCapturing}
+                  title="Queue hardware snapshot command and await image upload"
                 >
-                  <Camera size={14} />
-                  <span className="mono">SNAP</span>
+                  {isCapturing ? <RefreshCw size={14} className="spin-icon" /> : <Camera size={14} />}
+                  <span className="mono">{isCapturing ? 'QUEUED' : 'SNAP'}</span>
                 </button>
 
                 <button 
+                  type="button"
                   className={`hud-btn ${claheActive ? 'active' : ''}`}
                   onClick={onToggleClahe}
                   title="Toggle CLAHE Low-Light Adaptive Luminance"
@@ -151,6 +380,7 @@ export default function LivePlayer({
                 </button>
 
                 <button 
+                  type="button"
                   className="hud-btn"
                   onClick={() => setIsMuted(!isMuted)}
                   title={isMuted ? "Unmute audio" : "Mute audio"}
@@ -160,13 +390,12 @@ export default function LivePlayer({
               </div>
 
               <div className="hud-controls-right">
-                <div className="signal-quality mono" title="Bitrate & Sensor Stream Latency">
-                  <span>LATENCY: 42ms</span>
-                  <span className="hud-divider">|</span>
-                  <span>BITRATE: 4.8 Mb/s</span>
+                <div className="signal-quality mono" title="Stream Transport & Status">
+                  <span>STREAM: {streamState === 'streaming' ? 'MJPEG / 720p' : streamState.toUpperCase()}</span>
                 </div>
 
                 <button 
+                  type="button"
                   className="hud-btn icon-only"
                   onClick={handleFullscreenToggle}
                   title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}

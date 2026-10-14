@@ -88,9 +88,8 @@ class EvidenceWorker:
             crop, metadata = task
             event_id = uuid.uuid4().hex
             image_path = self.evidence_dir / f"{metadata['captured_at_us']}_{event_id}.jpg"
-            # Lightweight sharpening is intentionally used instead of full-frame SR.
-            sharpened = cv2.detailEnhance(crop, sigma_s=5, sigma_r=0.10)
-            cv2.imwrite(str(image_path), sharpened, [cv2.IMWRITE_JPEG_QUALITY, 92])
+            # Use fast JPEG write with nominal quality instead of heavy detailEnhance on ARM
+            cv2.imwrite(str(image_path), crop, [cv2.IMWRITE_JPEG_QUALITY, 90])
             row = {**metadata, "event_id": event_id, "image_path": str(image_path)}
             columns = ", ".join(row)
             placeholders = ", ".join("?" for _ in row)
@@ -146,10 +145,9 @@ def main() -> None:
                 if extracted is None:
                     continue
                 crop, (x1, y1, x2, y2) = extracted
-                if status == "UNIDENTIFIED_TARGET":
-                    worker.submit(crop, {"captured_at_us": captured_at_us, "status": status,
-                        "class_id": class_id, "class_name": name, "confidence": confidence,
-                        "x1": x1, "y1": y1, "x2": x2, "y2": y2, **asdict(telemetry)})
+                worker.submit(crop, {"captured_at_us": captured_at_us, "status": status,
+                    "class_id": class_id, "class_name": name, "confidence": confidence,
+                    "x1": x1, "y1": y1, "x2": x2, "y2": y2, **asdict(telemetry)})
                 color = (0, 200, 0) if status == "CONFIRMED" else (0, 165, 255)
                 cv2.rectangle(processed, (x1, y1), (x2, y2), color, 2)
                 cv2.putText(processed, f"{name} {confidence:.2f} {status}", (x1, max(20, y1 - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)

@@ -1,0 +1,7 @@
+# Lean Raspberry Pi 4 Edge Agent Dependencies
+# Eliminates heavy PyTorch, Torchvision, and Albumentations packages
+opencv-python-headless>=4.9.0
+numpy>=1.26.0
+gpiozero>=2.0
+# For quantized NCNN inference without PyTorch:
+# ncnn>=1.0.20240410

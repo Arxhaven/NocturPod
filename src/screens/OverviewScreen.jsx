@@ -25,10 +25,12 @@ export default function OverviewScreen({
   onSelectEvent, 
   onNavigate,
   onSnapshot,
+  isCapturing = false,
   isRecording,
   onToggleRecording,
   claheActive,
-  onToggleClahe
+  onToggleClahe,
+  onShowToast
 }) {
   return (
     <div className="overview-container">
@@ -37,35 +39,43 @@ export default function OverviewScreen({
         <div className="node-title-col">
           <div className="node-badge-row">
             <span className="node-name">NOCTURPOD // α-1</span>
-            <StatusBadge status={deviceStatus?.status ?? 'ONLINE'} size="small" />
+            <StatusBadge status={deviceStatus?.status ?? 'UNKNOWN'} size="small" />
           </div>
-          <span className="node-spec mono">RPI4-B • SONY/OV5647 IR-CUT • AM312 PIR • 20,000mAh UNIT</span>
+          <span className="node-spec mono">{deviceStatus?.hardware || 'NOCTURPOD EDGE NODE'}</span>
         </div>
 
         <div className="node-status-grid">
           <div className="status-item">
             <span className="item-label mono">CAMERA</span>
-            <span className="item-val mono active">{deviceStatus?.cameraStatus ?? 'ONLINE'}</span>
+            <span className={`item-val mono ${deviceStatus?.cameraStatus === 'ONLINE' ? 'active' : ''}`}>
+              {deviceStatus?.cameraStatus ?? 'UNKNOWN'}
+            </span>
           </div>
           <div className="status-item">
             <span className="item-label mono">PIR SENSOR</span>
-            <span className="item-val mono active">{deviceStatus?.pirStatus ?? 'ARMED'}</span>
+            <span className={`item-val mono ${deviceStatus?.pirStatus === 'ARMED' ? 'active' : ''}`}>
+              {deviceStatus?.pirStatus ?? 'UNKNOWN'}
+            </span>
           </div>
           <div className="status-item">
             <span className="item-label mono">STORAGE</span>
-            <span className="item-val mono">{deviceStatus?.storageUsedGB ?? 18.4} / 64 GB</span>
+            <span className="item-val mono">{deviceStatus?.storageUsedGB != null ? `${deviceStatus.storageUsedGB} / ${deviceStatus.storageTotalGB || 64} GB` : 'N/A'}</span>
           </div>
           <div className="status-item">
             <span className="item-label mono">POWER BANK</span>
-            <span className="item-val mono">{deviceStatus?.batteryPercent ?? 88}% ({deviceStatus?.batteryVoltage ?? '11.8V'})</span>
+            <span className="item-val mono">{deviceStatus?.batteryPercent != null ? `${deviceStatus.batteryPercent}%` : 'N/A (External DC)'}</span>
           </div>
           <div className="status-item">
             <span className="item-label mono">NETWORK</span>
-            <span className="item-val mono active">{deviceStatus?.wifiStatus ?? 'CONNECTED'} (-58 dBm)</span>
+            <span className={`item-val mono ${deviceStatus?.wifiStatus === 'CONNECTED' ? 'active' : ''}`}>
+              {deviceStatus?.wifiStatus ?? 'UNKNOWN'}{deviceStatus?.wifiRssi != null ? ` (${deviceStatus.wifiRssi} dBm)` : ''}
+            </span>
           </div>
           <div className="status-item">
             <span className="item-label mono">AI PIPELINE</span>
-            <span className="item-val mono active">NCNN INT8 ACTIVE</span>
+            <span className={`item-val mono ${deviceStatus?.status === 'ONLINE' ? 'active' : ''}`}>
+              {deviceStatus?.status === 'ONLINE' ? 'NCNN INT8 ACTIVE' : 'PIPELINE STANDBY'}
+            </span>
           </div>
         </div>
       </section>
@@ -89,11 +99,14 @@ export default function OverviewScreen({
 
           <LivePlayer 
             onSnapshot={onSnapshot}
+            isCapturing={isCapturing}
             isRecording={isRecording}
             onToggleRecording={onToggleRecording}
             claheActive={claheActive}
             onToggleClahe={onToggleClahe}
             irNightMode={deviceStatus?.irNightMode ?? 'AUTO_ACTIVE'}
+            deviceStatus={deviceStatus}
+            onShowToast={onShowToast}
           />
 
           {/* Under-feed compact metric blocks */}

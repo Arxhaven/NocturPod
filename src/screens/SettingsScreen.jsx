@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Sliders, 
   ShieldCheck, 
@@ -9,12 +9,21 @@ import {
   Save, 
   RotateCcw,
   CheckCircle2,
-  Lock
+  Lock,
+  AlertTriangle,
+  RefreshCw
 } from 'lucide-react';
 import './SettingsScreen.css';
 
-export default function SettingsScreen({ deviceStatus, onSaveSettings }) {
-  const [deviceName, setDeviceName] = useState('NocturPod α-1');
+export default function SettingsScreen({ 
+  serverConfig, 
+  isConfigLoading = false, 
+  configError = null, 
+  onRetryFetchConfig, 
+  onSaveSettings,
+  isDemoMode = false
+}) {
+  const [deviceName, setDeviceName] = useState('');
   const [pirSensitivity, setPirSensitivity] = useState('HIGH');
   const [claheClipLimit, setClaheClipLimit] = useState(2.2);
   const [videoClipDuration, setVideoClipDuration] = useState(30);
@@ -22,14 +31,124 @@ export default function SettingsScreen({ deviceStatus, onSaveSettings }) {
   const [lowConfidenceCapture, setLowConfidenceCapture] = useState(true);
   const [autoIrNightSync, setAutoIrNightSync] = useState(true);
   const [toastMessage, setToastMessage] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
-  const handleSave = () => {
-    setToastMessage('Hardware configuration dispatched to edge node.');
-    setTimeout(() => setToastMessage(''), 3000);
+  // Sync state whenever real server configuration is loaded/updated
+  useEffect(() => {
+    if (serverConfig) {
+      if (serverConfig.deviceName != null) setDeviceName(serverConfig.deviceName);
+      if (serverConfig.pirSensitivity != null) setPirSensitivity(serverConfig.pirSensitivity);
+      if (serverConfig.claheClipLimit != null) setClaheClipLimit(serverConfig.claheClipLimit);
+      if (serverConfig.videoClipDuration != null) setVideoClipDuration(serverConfig.videoClipDuration);
+      if (serverConfig.streamQuality != null) setStreamQuality(serverConfig.streamQuality);
+      if (serverConfig.lowConfidenceCapture != null) setLowConfidenceCapture(Boolean(serverConfig.lowConfidenceCapture));
+      if (serverConfig.autoIrNightSync != null) setAutoIrNightSync(Boolean(serverConfig.autoIrNightSync));
+    }
+  }, [serverConfig]);
+
+  const handleSave = async () => {
+    const payload = {
+      deviceName,
+      pirSensitivity,
+      claheClipLimit,
+      videoClipDuration,
+      streamQuality,
+      lowConfidenceCapture,
+      autoIrNightSync,
+    };
+    if (onSaveSettings) {
+      setIsSaving(true);
+      try {
+        await onSaveSettings(payload);
+        setToastMessage('Configuration committed to edge node.');
+      } catch (err) {
+        setToastMessage(`Failed to save configuration: ${err.message || 'Server error'}`);
+      } finally {
+        setIsSaving(false);
+        setTimeout(() => setToastMessage(''), 3500);
+      }
+    }
   };
+
+  if (isConfigLoading) {
+    return (
+      <div className="settings-screen-container">
+        <div className="glass-panel mono" style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--color-muted-sage)' }}>
+          <RefreshCw size={24} className="spin-icon" style={{ margin: '0 auto 12px', display: 'block' }} />
+          <span>QUERYING EDGE HARDWARE CONFIGURATION...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (configError || !serverConfig) {
+    return (
+      <div className="settings-screen-container">
+        <div 
+          className="glass-panel mono" 
+          style={{ 
+            padding: '30px', 
+            textAlign: 'center', 
+            border: '1px solid rgba(255, 77, 79, 0.3)',
+            background: 'rgba(255, 77, 79, 0.08)'
+          }}
+        >
+          <AlertTriangle size={32} style={{ color: '#ff7875', margin: '0 auto 14px', display: 'block' }} />
+          <h2 style={{ fontSize: '16px', color: '#ff7875', marginBottom: '8px' }}>
+            EDGE CONFIGURATION UNAVAILABLE
+          </h2>
+          <p style={{ color: 'var(--color-muted-sage)', fontSize: '13px', maxWidth: '540px', margin: '0 auto 20px', lineHeight: 1.6 }}>
+            {configError || 'Unable to retrieve active hardware settings from edge device. Connect to the device gateway to inspect or modify configuration registers.'}
+          </p>
+          {onRetryFetchConfig && (
+            <button 
+              type="button" 
+              onClick={onRetryFetchConfig}
+              className="mono"
+              style={{
+                background: 'rgba(255, 77, 79, 0.25)',
+                border: '1px solid #ff7875',
+                color: '#fff',
+                padding: '8px 18px',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '12px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+            >
+              <RefreshCw size={13} />
+              <span>RETRY CONFIGURATION SYNC</span>
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="settings-screen-container">
+      {isDemoMode && (
+        <div 
+          className="mono demo-config-banner" 
+          style={{
+            background: 'rgba(250, 173, 20, 0.12)',
+            border: '1px solid rgba(250, 173, 20, 0.3)',
+            color: '#faad14',
+            padding: '10px 16px',
+            borderRadius: '6px',
+            fontSize: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+        >
+          <AlertTriangle size={14} />
+          <span>DEMO MODE ACTIVE: Configuration shown is a sample preset. Changes will not be committed to physical hardware.</span>
+        </div>
+      )}
+
       {toastMessage && (
         <div className="toast-notification mono">
           <CheckCircle2 size={15} color="#52c41a" />
@@ -56,20 +175,24 @@ export default function SettingsScreen({ deviceStatus, onSaveSettings }) {
           </div>
 
           <div className="setting-field">
-            <label className="field-label">WI-FI SSID (2.4GHz / 5GHz DUAL BAND)</label>
+            <label className="field-label">WI-FI SSID (REPORTED)</label>
             <input 
               type="text" 
               className="field-input mono" 
-              defaultValue="NocturNet-Secure-5G" 
+              value={serverConfig.wifiSSID || 'Unconfigured'} 
+              readOnly
+              style={{ opacity: 0.7, cursor: 'not-allowed' }}
             />
           </div>
 
           <div className="setting-field">
-            <label className="field-label">STATIC IP RESERVATION</label>
+            <label className="field-label">IP ADDRESS (REPORTED)</label>
             <input 
               type="text" 
               className="field-input mono" 
-              defaultValue="192.168.1.142" 
+              value={serverConfig.ipAddress || 'Dynamic / DHCP'} 
+              readOnly
+              style={{ opacity: 0.7, cursor: 'not-allowed' }}
             />
           </div>
         </div>
@@ -179,7 +302,7 @@ export default function SettingsScreen({ deviceStatus, onSaveSettings }) {
             <label className="field-label">REST API & WEBSOCKET TLS</label>
             <div className="sec-pill mono">
               <Lock size={13} color="#52c41a" />
-              <span>ECDSA TLS 1.3 / AES-256-GCM ACTIVE</span>
+              <span>BEARER / X-API-KEY AUTH ACTIVE</span>
             </div>
           </div>
 
@@ -192,9 +315,13 @@ export default function SettingsScreen({ deviceStatus, onSaveSettings }) {
           </div>
 
           <div className="save-bar">
-            <button className="save-btn mono" onClick={handleSave}>
+            <button 
+              className="save-btn mono" 
+              onClick={handleSave}
+              disabled={isSaving}
+            >
               <Save size={14} />
-              <span>COMMIT CHANGES TO NOCTURPOD</span>
+              <span>{isSaving ? 'COMMITTING...' : 'COMMIT CHANGES TO NOCTURPOD'}</span>
             </button>
           </div>
         </div>

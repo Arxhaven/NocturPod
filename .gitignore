@@ -39,6 +39,9 @@ wheels/
 venv/
 ENV/
 
+# Application storage & runtime databases
+storage/
+
 # YOLO / Model weights & outputs
 runs/
 *.pt
@@ -50,10 +53,16 @@ runs/
 *.tar.gz
 *.rar
 
-# Environment variables
+# Environment variables and secrets
 .env
 .env.local
 .env.*.local
+*.key
+*.pem
+*.crt
+*.cert
+*.secret
+secrets/
 
 # Editor directories and files
 .vscode/*

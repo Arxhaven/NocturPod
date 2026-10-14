@@ -19,15 +19,20 @@ import './LiveMonitorScreen.css';
 export default function LiveMonitorScreen({ 
   deviceStatus, 
   onSnapshot, 
+  isCapturing = false,
   isRecording, 
   onToggleRecording,
   claheActive,
   onToggleClahe,
-  events
+  events = [],
+  onShowToast
 }) {
-  const [streamBitrate, setStreamBitrate] = useState('4.8 Mbps');
   const [exposureMode, setExposureMode] = useState('NIGHT_IR_SYNC');
-  const [hudGridOverlay, setHudGridOverlay] = useState(true);
+  const isOnline = deviceStatus?.status === 'ONLINE';
+
+  // Get active detected targets from latest event or empty
+  const latestEventWithDetections = events.find(e => e.detections && e.detections.length > 0);
+  const activeTargets = latestEventWithDetections?.detections || [];
 
   return (
     <div className="live-monitor-container">
@@ -37,11 +42,14 @@ export default function LiveMonitorScreen({
           <div className="monitor-player-card glass-panel">
             <LivePlayer 
               onSnapshot={onSnapshot}
+              isCapturing={isCapturing}
               isRecording={isRecording}
               onToggleRecording={onToggleRecording}
               claheActive={claheActive}
               onToggleClahe={onToggleClahe}
               irNightMode={deviceStatus?.irNightMode ?? 'AUTO_ACTIVE'}
+              deviceStatus={deviceStatus}
+              onShowToast={onShowToast}
             />
           </div>
 
@@ -71,9 +79,9 @@ export default function LiveMonitorScreen({
 
             <div className="ctrl-group">
               <span className="ctrl-label mono">STREAM:</span>
-              <span className="ctrl-val mono">H.264 / RTSP OVER WS</span>
+              <span className="ctrl-val mono">{isOnline ? 'MJPEG OVER HTTP (/stream)' : 'OFFLINE / STANDBY'}</span>
               <span className="ctrl-divider">|</span>
-              <span className="ctrl-val mono">JITTER: 1.2ms</span>
+              <span className="ctrl-val mono">{isOnline ? 'TRANSPORT: OK' : 'NO CARRIER'}</span>
             </div>
           </div>
         </div>
@@ -87,51 +95,52 @@ export default function LiveMonitorScreen({
                 <span className="panel-title">REAL-TIME INFERENCE STREAM</span>
                 <span className="panel-sub mono">YOLOV8N • ADAPTIVE CLAHE</span>
               </div>
-              <StatusBadge status="ARMED" size="small" />
+              <StatusBadge status={isOnline ? (deviceStatus?.pirStatus ?? "READY") : "OFFLINE"} size="small" />
             </div>
 
             <div className="telemetry-box mono">
               <div className="t-row">
-                <span>INFERENCE LATENCY:</span>
-                <span className="t-val">38.4 ms</span>
+                <span>INFERENCE ENGINE:</span>
+                <span className="t-val">{isOnline ? 'YOLOv8n / NCNN' : 'Standby (Offline)'}</span>
               </div>
               <div className="t-row">
-                <span>CLAHE CLIP LIMIT:</span>
-                <span className="t-val">2.28 (Adaptive)</span>
+                <span>CLAHE NORMALIZATION:</span>
+                <span className="t-val">{claheActive ? 'Active (2.2)' : 'Bypassed'}</span>
               </div>
               <div className="t-row">
-                <span>AM312 PIR SENSOR:</span>
-                <span className="t-val active">ACTIVE (Triggered)</span>
+                <span>PIR SENSOR:</span>
+                <span className={`t-val ${deviceStatus?.pirStatus === 'ARMED' ? 'active' : ''}`}>
+                  {deviceStatus?.pirStatus ?? 'UNKNOWN'}
+                </span>
               </div>
               <div className="t-row">
-                <span>NCNN BACKEND:</span>
-                <span className="t-val">Vulkan / ARM FP16</span>
+                <span>BACKEND STATUS:</span>
+                <span className="t-val">{isOnline ? 'CONNECTED' : 'DISCONNECTED'}</span>
               </div>
             </div>
 
             <div className="target-stream-list">
               <span className="target-stream-header mono">DETECTED OBJECTS IN FRAME</span>
-              <div className="target-item">
-                <div className="target-badge-col">
-                  <span className="t-badge mono">PERSON</span>
-                  <span className="t-conf mono">94.2%</span>
+              {activeTargets.length > 0 ? (
+                activeTargets.map((tgt, i) => (
+                  <div key={i} className="target-item">
+                    <div className="target-badge-col">
+                      <span className="t-badge mono">{tgt.label.toUpperCase()}</span>
+                      <span className="t-conf mono">
+                        {tgt.confidence != null ? `${(tgt.confidence <= 1 ? tgt.confidence * 100 : tgt.confidence).toFixed(1)}%` : ''}
+                      </span>
+                    </div>
+                    <div className="target-meta">
+                      <span className="target-coords mono">BBOX: [{Array.isArray(tgt.box) ? tgt.box.join(', ') : 'N/A'}]</span>
+                      <span className="target-status mono">STATUS: CONFIRMED TARGET</span>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="target-item-empty mono" style={{ padding: '16px 10px', color: 'var(--color-muted-sage)', fontSize: '11px', textAlign: 'center' }}>
+                  No active optical targets in current frame.
                 </div>
-                <div className="target-meta">
-                  <span className="target-coords mono">BBOX: [140, 80, 420, 580]</span>
-                  <span className="target-status mono">STATUS: CONFIRMED TARGET</span>
-                </div>
-              </div>
-
-              <div className="target-item secondary">
-                <div className="target-badge-col">
-                  <span className="t-badge mono">BICYCLE</span>
-                  <span className="t-conf mono">86.1%</span>
-                </div>
-                <div className="target-meta">
-                  <span className="target-coords mono">BBOX: [380, 240, 520, 510]</span>
-                  <span className="target-status mono">STATUS: CONFIRMED TARGET</span>
-                </div>
-              </div>
+              )}
             </div>
           </div>
 
@@ -143,26 +152,18 @@ export default function LiveMonitorScreen({
             </div>
 
             <div className="buffer-log-list mono">
-              <div className="buffer-entry">
-                <span className="b-time">12:31:08.412</span>
-                <span className="b-event">PERSON CONFIRMED (0.94)</span>
-              </div>
-              <div className="buffer-entry">
-                <span className="b-time">12:31:07.120</span>
-                <span className="b-event">AI INFERENCE COMPLETE</span>
-              </div>
-              <div className="buffer-entry">
-                <span className="b-time">12:31:05.804</span>
-                <span className="b-event">CLAHE LUM ENHANCE (2.28)</span>
-              </div>
-              <div className="buffer-entry">
-                <span className="b-time">12:31:05.102</span>
-                <span className="b-event">OV5647 FRAME CAPTURED</span>
-              </div>
-              <div className="buffer-entry active">
-                <span className="b-time">12:31:04.990</span>
-                <span className="b-event highlight">AM312 PIR MOTION TRIP</span>
-              </div>
+              {events.length > 0 ? (
+                events.slice(0, 5).map((evt, idx) => (
+                  <div key={evt.id || idx} className={`buffer-entry ${idx === 0 ? 'active' : ''}`}>
+                    <span className="b-time">{evt.timestamp?.split(' ')[1] || evt.timestamp}</span>
+                    <span className={`b-event ${idx === 0 ? 'highlight' : ''}`}>{evt.label?.toUpperCase()}</span>
+                  </div>
+                ))
+              ) : (
+                <div style={{ padding: '14px 10px', color: 'var(--color-muted-sage)', fontSize: '11px', textAlign: 'center' }}>
+                  No trigger events in buffer.
+                </div>
+              )}
             </div>
           </div>
         </div>
