@@ -2,6 +2,8 @@ import React from 'react';
 import './MetricCard.css';
 
 export default function MetricCard({ label, value, subtext, icon: Icon, trend }) {
+  const displayValue = value != null && value !== '' ? value : 'N/A';
+
   return (
     <div className="metric-card glass-panel">
       <div className="metric-header">
@@ -14,7 +16,7 @@ export default function MetricCard({ label, value, subtext, icon: Icon, trend })
       </div>
 
       <div className="metric-body">
-        <span className="metric-value mono">{value}</span>
+        <span className="metric-value mono">{displayValue}</span>
         {subtext && <span className="metric-subtext">{subtext}</span>}
       </div>
 

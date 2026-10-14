@@ -58,7 +58,7 @@
 html, body {
   width: 100%;
   height: 100%;
-  overflow-x: hidden;
+  overflow: hidden;
   background-color: var(--color-primary-dark);
   color: var(--color-light-green);
   font-family: var(--font-primary);
@@ -69,11 +69,13 @@ html, body {
 }
 
 #root {
-  min-height: 100vh;
+  height: 100vh;
+  width: 100vw;
   display: flex;
   flex-direction: column;
   position: relative;
   z-index: 1;
+  overflow: hidden;
 }
 
 /* Custom Scrollbars */
@@ -138,100 +140,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   outline-offset: 2px;
 }
 
-/* Live Animated Background Layer */
-.animated-bg {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  pointer-events: none;
-  z-index: 0;
-  overflow: hidden;
-  background: radial-gradient(circle at 15% 20%, #163832 0%, #0B2B26 40%, #051F20 90%);
-}
-
-.animated-bg-orb {
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(80px);
-  opacity: 0.16;
-  animation: floatOrb 24s infinite alternate var(--ease-apple);
-}
-
-.orb-1 {
-  width: 600px;
-  height: 600px;
-  background: var(--color-medium-green);
-  top: -100px;
-  left: -100px;
-  animation-duration: 28s;
-}
-
-.orb-2 {
-  width: 500px;
-  height: 500px;
-  background: var(--color-muted-sage);
-  bottom: -150px;
-  right: 5%;
-  animation-duration: 32s;
-  animation-delay: -5s;
-}
-
-.orb-3 {
-  width: 350px;
-  height: 350px;
-  background: var(--color-dark-emerald);
-  top: 45%;
-  left: 35%;
-  animation-duration: 22s;
-  animation-delay: -10s;
-}
-
-/* Subtle scanning mesh lines */
-.animated-bg-grid {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-image: 
-    linear-gradient(rgba(142, 182, 155, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(142, 182, 155, 0.03) 1px, transparent 1px);
-  background-size: 40px 40px;
-  mask-image: radial-gradient(circle at 50% 50%, black 40%, transparent 85%);
-  -webkit-mask-image: radial-gradient(circle at 50% 50%, black 40%, transparent 85%);
-}
-
-/* Subtle scanning beam */
-.scan-beam {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, rgba(142, 182, 155, 0.15), rgba(218, 241, 222, 0.35), rgba(142, 182, 155, 0.15), transparent);
-  animation: scanSweep 12s linear infinite;
-  opacity: 0.4;
-}
-
-@keyframes floatOrb {
-  0% { transform: translate(0, 0) scale(1); }
-  50% { transform: translate(60px, 40px) scale(1.1); }
-  100% { transform: translate(-40px, 80px) scale(0.95); }
-}
-
-@keyframes scanSweep {
-  0% { transform: translateY(-5vh); opacity: 0; }
-  10% { opacity: 0.4; }
-  90% { opacity: 0.4; }
-  100% { transform: translateY(105vh); opacity: 0; }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .animated-bg-orb, .scan-beam {
-    animation: none !important;
-  }
   * {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;

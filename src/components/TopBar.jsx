@@ -2,143 +2,105 @@ import React, { useState, useEffect } from 'react';
 import { 
   Wifi, 
   WifiOff, 
-  Battery, 
-  BatteryCharging, 
-  ShieldCheck, 
   Camera, 
-  Cpu, 
   Clock, 
-  Bell, 
-  SlidersHorizontal,
-  ChevronDown,
-  Sparkles
+  Circle,
+  Server
 } from 'lucide-react';
 import StatusBadge from './StatusBadge';
 import './TopBar.css';
 
 export default function TopBar({ 
   deviceStatus, 
-  title, 
-  subtitle, 
-  onQuickCapture,
+  backendOnline,
+  title: propTitle, 
+  subtitle: propSubtitle, 
+  onQuickCapture, 
   isCapturing = false,
-  isDemoMode = false,
-  onToggleDemoMode
+  activeTab = 'overview', 
+  isRecording = false, 
+  onToggleRecording 
 }) {
   const [currentTime, setCurrentTime] = useState('');
-  const isOnline = deviceStatus?.status === 'ONLINE';
 
   useEffect(() => {
     const updateTime = () => {
       const now = new Date();
-      setCurrentTime(now.toTimeString().split(' ')[0] + ' UTC');
+      setCurrentTime(now.toTimeString().split(' ')[0]);
     };
     updateTime();
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
   }, []);
 
+  const isDeviceOnline = deviceStatus?.status === 'ONLINE' || deviceStatus?.status === 'RECORDING';
+  const camStatus = deviceStatus?.camera_status || (deviceStatus?.cameraStatus ?? 'N/A');
+  const wifiStatus = deviceStatus?.wifi_status || (deviceStatus?.wifiStatus ?? 'N/A');
+  const isWifiConnected = wifiStatus === 'CONNECTED' || wifiStatus === 'ONLINE';
+
+  const getPageTitle = (tab) => {
+    switch (tab) {
+      case 'overview': return { title: 'Overview', sub: 'NODE TELEMETRY & LIVE OPERATIONAL METRICS' };
+      case 'live': return { title: 'Live Monitor', sub: 'REAL-TIME OV5647 FEED & CAMERA CONTROLS' };
+      case 'images': return { title: 'Captures', sub: 'GENUINE OV5647 STILLS & AI ENHANCEMENTS' };
+      case 'footage': return { title: 'Recordings', sub: 'GENUINE FOOTAGE & AI ENHANCED CLIPS' };
+      case 'events': return { title: 'Events', sub: 'CHRONOLOGICAL SENSOR AUDIT TRAIL' };
+      case 'device': return { title: 'Device Telemetry', sub: 'RASPBERRY PI 4 HARDWARE REGISTERS' };
+      default: return { title: 'NocturPod', sub: 'EDGE SURVEILLANCE DASHBOARD' };
+    }
+  };
+
+  const defaultTitleInfo = getPageTitle(activeTab);
+  const displayTitle = propTitle || defaultTitleInfo.title;
+  const displaySub = propSubtitle || defaultTitleInfo.sub;
+
   return (
     <header className="topbar-container">
       <div className="topbar-left">
         <div className="page-heading">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <h1 className="topbar-title">{title}</h1>
-            {isDemoMode && (
-              <span 
-                className="mono" 
-                style={{
-                  fontSize: '10px',
-                  fontWeight: 600,
-                  letterSpacing: '0.05em',
-                  padding: '3px 8px',
-                  background: 'rgba(250, 173, 20, 0.15)',
-                  border: '1px solid #faad14',
-                  borderRadius: '4px',
-                  color: '#faad14'
-                }}
-              >
-                DEMO MODE
-              </span>
-            )}
-          </div>
-          {subtitle && <span className="topbar-subtitle mono">{subtitle}</span>}
+          <h1 className="topbar-title">{displayTitle}</h1>
+          <span className="topbar-subtitle mono">{displaySub}</span>
         </div>
       </div>
 
       <div className="topbar-right">
-        {/* Device telemetry pill */}
+        {/* Backend Connectivity Indicator */}
+        <div className="backend-link-pill mono" title="Cloud API Backend Status">
+          <Server size={13} className={backendOnline ? "server-icon online" : "server-icon offline"} />
+          <span>BACKEND: {backendOnline ? 'CONNECTED' : 'UNAVAILABLE'}</span>
+        </div>
+
+        {/* Real Device Telemetry Pill */}
         <div className="telemetry-bar">
-          <div className="telemetry-item" title="Device Connectivity">
-            {isOnline ? (
+          <div className="telemetry-item" title="Device Wi-Fi Link">
+            {isWifiConnected ? (
               <Wifi size={14} className="telemetry-icon active" />
             ) : (
-              <WifiOff size={14} className="telemetry-icon" style={{ opacity: 0.6 }} />
+              <WifiOff size={14} className="telemetry-icon offline" />
             )}
-            <span className="mono">{deviceStatus?.wifiSSID ?? (deviceStatus?.wifiStatus || (isOnline ? 'Connected' : 'Offline'))}</span>
+            <span className="mono">{wifiStatus}</span>
           </div>
 
           <div className="telemetry-divider" />
 
-          <div className="telemetry-item" title="Camera Sensor">
-            <Camera size={14} className={`telemetry-icon ${deviceStatus?.cameraStatus === 'ONLINE' ? 'active' : ''}`} />
-            <span className="mono">
-              {deviceStatus?.cameraStatus === 'ONLINE' ? 'OV5647 IR' : (deviceStatus?.cameraStatus || 'UNKNOWN')}
-            </span>
+          <div className="telemetry-item" title="OV5647 Camera Sensor State">
+            <Camera size={14} className={`telemetry-icon ${camStatus === 'ONLINE' ? 'active' : ''}`} />
+            <span className="mono">CAM {camStatus}</span>
           </div>
 
           <div className="telemetry-divider" />
 
-          <div className="telemetry-item" title="PIR Motion Sensor">
-            <ShieldCheck size={14} className={`telemetry-icon ${deviceStatus?.pirStatus === 'ARMED' ? 'active' : ''}`} />
-            <span className="mono">
-              {deviceStatus?.pirStatus === 'ARMED' ? 'PIR ARMED' : (deviceStatus?.pirStatus || 'UNKNOWN')}
-            </span>
-          </div>
-
-          <div className="telemetry-divider" />
-
-          <div className="telemetry-item" title="Battery Unit">
-            <Battery size={14} className={`telemetry-icon ${deviceStatus?.batteryPercent != null ? 'active' : ''}`} />
-            <span className="mono">{deviceStatus?.batteryPercent != null ? `${deviceStatus.batteryPercent}%` : 'N/A'}</span>
-          </div>
-
-          <div className="telemetry-divider" />
-
-          <div className="telemetry-item" title="System Clock">
+          <div className="telemetry-item" title="Local Dashboard Clock">
             <Clock size={14} className="telemetry-icon" />
-            <span className="mono">{currentTime || '00:00:00'}</span>
+            <span className="mono">{currentTime || '--:--:--'}</span>
           </div>
         </div>
 
-        {/* Global Node Status Badge */}
-        <StatusBadge status={deviceStatus?.status ?? 'UNKNOWN'} size="normal" pulse={isOnline} />
-
-        {/* Demo Mode Toggle */}
-        {onToggleDemoMode && (
-          <button
-            type="button"
-            className="mono"
-            onClick={onToggleDemoMode}
-            title={isDemoMode ? "Switch to real edge node mode" : "Explore dashboard with simulated demo data"}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '6px 12px',
-              borderRadius: '5px',
-              fontSize: '11px',
-              background: isDemoMode ? 'rgba(250, 173, 20, 0.2)' : 'rgba(22, 56, 50, 0.7)',
-              border: `1px solid ${isDemoMode ? '#faad14' : 'var(--border-muted)'}`,
-              color: isDemoMode ? '#faad14' : 'var(--color-muted-sage)',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease'
-            }}
-          >
-            <Sparkles size={13} />
-            <span>{isDemoMode ? 'LIVE MODE' : 'DEMO MODE'}</span>
-          </button>
-        )}
+        {/* Device State Badge */}
+        <StatusBadge 
+          status={isDeviceOnline ? (deviceStatus?.status || 'ONLINE') : 'OFFLINE'} 
+          size="normal" 
+        />
 
         {/* Quick action: Capture */}
         {onQuickCapture && (
@@ -146,12 +108,25 @@ export default function TopBar({
             type="button"
             className="quick-trigger-btn"
             onClick={onQuickCapture}
-            disabled={isCapturing}
-            title={isCapturing ? "Awaiting Raspberry Pi capture upload" : "Trigger edge capture snapshot"}
-            style={{ opacity: isCapturing ? 0.7 : 1, cursor: isCapturing ? 'not-allowed' : 'pointer' }}
+            title={isDeviceOnline ? "Trigger edge snapshot" : "Device is offline"}
+            disabled={!backendOnline || isCapturing}
           >
-            {isCapturing ? <Sparkles size={14} className="spin-icon" /> : <Camera size={14} />}
-            <span>{isCapturing ? 'CAPTURING...' : 'TRIGGER CAPTURE'}</span>
+            <Camera size={14} />
+            <span>{isCapturing ? 'CAPTURING...' : 'CAPTURE'}</span>
+          </button>
+        )}
+
+        {/* Quick action: Recording */}
+        {onToggleRecording && (
+          <button 
+            type="button"
+            className={`quick-trigger-btn record-toggle-btn ${isRecording ? 'recording' : ''}`}
+            onClick={() => onToggleRecording(!isRecording)}
+            title={isRecording ? "Stop Recording" : "Start Recording"}
+            disabled={!backendOnline}
+          >
+            <Circle size={14} fill={isRecording ? "currentColor" : "none"} />
+            <span>{isRecording ? "STOP REC" : "RECORD"}</span>
           </button>
         )}
       </div>

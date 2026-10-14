@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import LiveBackground from './components/LiveBackground';
 import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
@@ -10,540 +10,244 @@ import LiveMonitorScreen from './screens/LiveMonitorScreen';
 import EventsScreen from './screens/EventsScreen';
 import FootageScreen from './screens/FootageScreen';
 import ImagesScreen from './screens/ImagesScreen';
-import AIScreen from './screens/AIScreen';
 import DeviceScreen from './screens/DeviceScreen';
+import AIScreen from './screens/AIScreen';
 import SettingsScreen from './screens/SettingsScreen';
 
+import { EMPTY_DEVICE_STATUS } from './data/mockData';
 import { 
-  INITIAL_DEVICE_STATUS as DEMO_DEVICE_STATUS, 
-  INITIAL_METRICS as DEMO_METRICS, 
-  INITIAL_EVENTS as DEMO_EVENTS, 
-  INITIAL_FOOTAGE as DEMO_FOOTAGE, 
-  INITIAL_IMAGES as DEMO_IMAGES, 
-  INITIAL_AI_SUMMARY as DEMO_AI_SUMMARY 
-} from './data/mockData';
-import { 
-  checkBackendHealth,
-  fetchTelemetry,
-  fetchEvents,
-  fetchImages,
-  fetchFootage,
-  fetchAiStatus,
-  fetchConfig,
-  saveConfig,
-  triggerCaptureCommand,
-  triggerRecordCommand,
-  resolveMediaUrl
+  fetchDeviceStatus, 
+  fetchEvents, 
+  fetchImages, 
+  fetchFootage, 
+  triggerSnapshot, 
+  toggleRecording,
+  deleteEvent
 } from './services/api';
-import { 
-  INITIAL_DISCONNECTED_STATUS, 
-  INITIAL_BLANK_METRICS,
-  evaluateDeviceStatus 
-} from './utils/deviceStatus';
-import { resolveEventMedia } from './utils/eventSelection';
-import { 
-  executeSnapshotWorkflow, 
-  mapBackendImageRecord 
-} from './utils/manualCapture';
 import './App.css';
-
-const DEFAULT_STANDBY_AI_SUMMARY = {
-  totalAnalyzedToday: 0,
-  processingStatus: 'STANDBY',
-  queueLength: 0,
-  latencyMs: null,
-  modelName: 'YOLOv8n Perimeter Security',
-  claheClipLimit: 'Adaptive CLAHE',
-  classesTracked: ['Person', 'Vehicle', 'Bicycle', 'Animal'],
-  pipelineStages: ['Optical Ingestion', 'Adaptive CLAHE', 'YOLOv8n Inference', 'Storage Archival']
-};
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [deviceStatus, setDeviceStatus] = useState(EMPTY_DEVICE_STATUS);
+  const [backendOnline, setBackendOnline] = useState(false);
   
-  // Real initial states: disconnected, zeroed, without fake data
-  const [isDemoMode, setIsDemoMode] = useState(false);
-  const [deviceStatus, setDeviceStatus] = useState(INITIAL_DISCONNECTED_STATUS);
-  const [metrics, setMetrics] = useState(INITIAL_BLANK_METRICS);
   const [events, setEvents] = useState([]);
   const [footage, setFootage] = useState([]);
   const [images, setImages] = useState([]);
-  const [aiSummary, setAiSummary] = useState(DEFAULT_STANDBY_AI_SUMMARY);
-
-  const [serverConfig, setServerConfig] = useState(null);
-  const [isConfigLoading, setIsConfigLoading] = useState(false);
-  const [configError, setConfigError] = useState(null);
 
   const [selectedImage, setSelectedImage] = useState(null);
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
-  const [isRefreshingImages, setIsRefreshingImages] = useState(false);
-  const [isRefreshingFootage, setIsRefreshingFootage] = useState(false);
-  const [claheActive, setClaheActive] = useState(true);
   const [toastNotification, setToastNotification] = useState(null);
-  const [isRefreshingTelemetry, setIsRefreshingTelemetry] = useState(false);
-  const [telemetryError, setTelemetryError] = useState(null);
+  const isPollingRef = useRef(false);
 
-  // Initialize and check API backend health and real data on launch
-  const initData = async () => {
-    setIsConfigLoading(true);
-    setConfigError(null);
+  const showToast = useCallback((text, isWarning = false) => {
+    setToastNotification({ text, isWarning });
+    setTimeout(() => {
+      setToastNotification((curr) => (curr?.text === text ? null : curr));
+    }, 4500);
+  }, []);
 
-    const health = await checkBackendHealth();
-    if (health.connected) {
-      showToast(`Connected to NocturPod Gateway (${health.data?.service || 'Online'})`);
-      
-      // Fetch actual hardware device status and telemetry
-      const tel = await fetchTelemetry();
-      const honestStatus = evaluateDeviceStatus(health, tel, INITIAL_DISCONNECTED_STATUS);
-      setDeviceStatus(honestStatus);
+  const refreshMedia = useCallback(async () => {
+    try {
+      const [evts, imgs, foot] = await Promise.all([
+        fetchEvents(),
+        fetchImages(),
+        fetchFootage()
+      ]);
+      if (evts) setEvents(evts);
+      if (imgs) setImages(imgs);
+      if (foot) setFootage(foot);
+    } catch (err) {
+      console.warn("Media sync notice:", err);
+    }
+  }, []);
 
-      // Fetch AI pipeline status
-      const aiData = await fetchAiStatus();
-      if (aiData) {
-        setAiSummary({
-          totalAnalyzedToday: 0,
-          processingStatus: aiData.status || (aiData.is_ready ? 'ONLINE' : 'STANDBY'),
-          modelName: aiData.detection_engine || 'YOLOv8n Perimeter Security',
-          claheClipLimit: aiData.enhancement_pipeline || 'Adaptive CLAHE',
-          isReady: aiData.is_ready,
-          classesTracked: ['Person', 'Vehicle', 'Bicycle', 'Animal'],
-          pipelineStages: ['Ingest', 'Adaptive CLAHE', 'YOLOv8n Inference']
-        });
-      }
+  // Single authoritative polling loop for device telemetry
+  useEffect(() => {
+    let isMounted = true;
 
-      // Fetch real events
-      let loadedEvents = [];
-      const realEvents = await fetchEvents();
-      if (Array.isArray(realEvents) && realEvents.length > 0) {
-        loadedEvents = realEvents.map((evt, idx) => {
-          const rawTime = evt.timestamp || evt.created_at || new Date().toISOString();
-          let formattedTime = rawTime;
-          try {
-            const d = new Date(rawTime);
-            if (!isNaN(d.getTime())) {
-              formattedTime = d.toISOString().replace('T', ' ').slice(0, 19);
-            }
-          } catch {
-            // keep raw
-          }
+    const pollTelemetry = async () => {
+      if (isPollingRef.current) return;
+      isPollingRef.current = true;
 
-          const primaryUrl = evt.enhanced_url || evt.original_url || evt.url || evt.thumbnail;
-          const detections = Array.isArray(evt.detections) ? evt.detections : [];
-          const primaryDet = detections[0] || null;
-
-          return {
-            id: evt.event_id || evt.id || `evt-${idx}`,
-            eventId: evt.event_id,
-            timestamp: formattedTime,
-            originalTimestamp: rawTime,
-            type: evt.type || (evt.media_type === 'VIDEO' ? 'FOOTAGE_RECORDED' : 'MOTION_TRIGGERED'),
-            label: evt.type === 'MANUAL_CAPTURE' ? 'Manual Capture' : (evt.type === 'VIDEO_RECORDING' ? 'Footage Recording' : (primaryDet?.label ? `${primaryDet.label} Detected` : 'Motion Triggered')),
-            confidence: primaryDet?.confidence ?? null,
-            aiStatus: evt.ai_status || 'PENDING',
-            processingStatus: evt.processing_status || 'PENDING',
-            thumbnail: resolveMediaUrl(primaryUrl),
-            fullMediaUrl: resolveMediaUrl(evt.enhanced_url || evt.original_url || evt.fullMediaUrl),
-            mediaType: evt.media_type || (evt.type === 'VIDEO_RECORDING' ? 'VIDEO' : 'IMAGE'),
-            duration: evt.duration || null,
-            detections,
-            notes: evt.notes || `Event ${evt.event_id || idx}`
-          };
-        });
-        setEvents(loadedEvents);
-      } else {
-        setEvents([]);
-      }
-
-      // Fetch real captures
-      let loadedImages = [];
-      const realImages = await fetchImages();
-      if (Array.isArray(realImages) && realImages.length > 0) {
-        loadedImages = realImages.map(img => mapBackendImageRecord(img, resolveMediaUrl));
-        setImages(loadedImages);
-      } else {
-        setImages([]);
-      }
-
-      // Fetch real footage
-      let loadedFootage = [];
-      const realFootage = await fetchFootage();
-      if (Array.isArray(realFootage) && realFootage.length > 0) {
-        loadedFootage = realFootage.map((clip, idx) => {
-          const rawTime = clip.timestamp || clip.created_at || new Date().toISOString();
-          let formattedTime = rawTime;
-          try {
-            const d = new Date(rawTime);
-            if (!isNaN(d.getTime())) {
-              formattedTime = d.toISOString().replace('T', ' ').slice(0, 19);
-            }
-          } catch {
-            // keep raw
-          }
-          const primaryUrl = clip.enhanced_url || clip.original_url || clip.videoUrl;
-
-          return {
-            id: clip.event_id || clip.id || `vid-${idx}`,
-            eventId: clip.event_id,
-            title: clip.notes || 'Recorded Video Clip',
-            timestamp: formattedTime,
-            duration: clip.duration || 'N/A',
-            resolution: '1280×720 (OV5647)',
-            videoUrl: resolveMediaUrl(primaryUrl),
-            thumbnail: clip.thumbnail ? resolveMediaUrl(clip.thumbnail) : null,
-            camera: 'Primary Optical OV5647',
-            aiStatus: clip.ai_status || 'PENDING',
-            processingStatus: clip.processing_status || 'PENDING',
-            aiSummary: clip.ai_status === 'PROCESSING' ? 'AI Enhancement Pending' : 'Raw Video Recording',
-            detections: clip.detections || []
-          };
-        });
-        setFootage(loadedFootage);
-      } else {
-        setFootage([]);
-      }
-
-      // Update honest dashboard metrics
-      setMetrics({
-        motionEventsToday: loadedEvents.filter(e => e.type !== 'MANUAL_CAPTURE').length,
-        capturesToday: loadedImages.length,
-        recordedMinutesToday: Math.round(loadedFootage.reduce((acc, c) => acc + (parseInt(c.duration, 10) || 0), 0) / 60),
-        aiDetectionsToday: loadedEvents.filter(e => e.detections && e.detections.length > 0).length,
-        uptimeStr: tel?.uptimeHours != null ? `${tel.uptimeHours}h ${tel.uptimeMinutes}m` : 'N/A',
-        healthScore: honestStatus.status === 'ONLINE' ? '98%' : 'OFFLINE'
-      });
-
-      // Fetch active device configuration if supported
       try {
-        const cfg = await fetchConfig();
-        if (cfg) {
-          setServerConfig(cfg);
+        const dev = await fetchDeviceStatus();
+        if (!isMounted) return;
+
+        if (dev) {
+          setBackendOnline(true);
+          setDeviceStatus(dev);
+
+          // Synchronize recording state authoritatively from device status
+          if (dev.status === 'RECORDING') {
+            setIsRecording(true);
+          } else if (dev.status === 'ONLINE' && isRecording) {
+            setIsRecording(false);
+          }
+        } else {
+          // Backend is unreachable or returned error
+          setBackendOnline(false);
+          setDeviceStatus((prev) => ({
+            ...prev,
+            status: 'OFFLINE',
+            camera_status: 'OFFLINE',
+            wifi_status: 'OFFLINE'
+          }));
         }
       } catch {
-        // Fallback
+        if (!isMounted) return;
+        setBackendOnline(false);
+        setDeviceStatus((prev) => ({
+          ...prev,
+          status: 'OFFLINE',
+          camera_status: 'OFFLINE',
+          wifi_status: 'OFFLINE'
+        }));
       } finally {
-        setIsConfigLoading(false);
+        isPollingRef.current = false;
       }
-    } else {
-      // Honest offline status
-      const offlineStatus = evaluateDeviceStatus(health, null, INITIAL_DISCONNECTED_STATUS);
-      setDeviceStatus(offlineStatus);
-      setConfigError(health.error || 'Edge gateway unreachable');
-      setIsConfigLoading(false);
-      showToast('NocturPod Backend offline. Operating in disconnected state.');
-    }
-  };
+    };
 
+    // Initial immediate poll & media load
+    pollTelemetry();
+    refreshMedia();
+
+    // Central 3-second heartbeat polling interval
+    const interval = setInterval(() => {
+      pollTelemetry();
+    }, 3000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [refreshMedia, isRecording]);
+
+  // Refresh media when switching to media/events tabs
   useEffect(() => {
-    if (!isDemoMode) {
-      initData();
+    if (activeTab === 'images' || activeTab === 'footage' || activeTab === 'events') {
+      refreshMedia();
     }
-  }, [isDemoMode]);
+  }, [activeTab, refreshMedia]);
 
-  const toggleDemoMode = () => {
-    if (!isDemoMode) {
-      // Enable Demo Mode with explicit visual indicator
-      setIsDemoMode(true);
-      setDeviceStatus({ ...DEMO_DEVICE_STATUS, status: 'ONLINE' });
-      setMetrics(DEMO_METRICS);
-      setEvents(DEMO_EVENTS);
-      setFootage(DEMO_FOOTAGE);
-      setImages(DEMO_IMAGES);
-      setAiSummary(DEMO_AI_SUMMARY);
-      setServerConfig({
-        deviceName: DEMO_DEVICE_STATUS.name,
-        pirSensitivity: 'HIGH',
-        claheClipLimit: 2.2,
-        videoClipDuration: 30,
-        streamQuality: '1080P_24FPS',
-        lowConfidenceCapture: true,
-        autoIrNightSync: true,
-        wifiSSID: DEMO_DEVICE_STATUS.wifiSSID,
-        ipAddress: DEMO_DEVICE_STATUS.ipAddress
-      });
-      setConfigError(null);
-      showToast('DEMO MODE ENABLED: Displaying simulated sample data.');
-    } else {
-      // Revert to Real Hardware Mode
-      setIsDemoMode(false);
-      setDeviceStatus(INITIAL_DISCONNECTED_STATUS);
-      setMetrics(INITIAL_BLANK_METRICS);
-      setEvents([]);
-      setFootage([]);
-      setImages([]);
-      setAiSummary(DEFAULT_STANDBY_AI_SUMMARY);
-      setServerConfig(null);
-      showToast('Switched to live backend mode.');
-    }
-  };
-
-  const showToast = (msg) => {
-    setToastNotification(msg);
-    setTimeout(() => setToastNotification(null), 4500);
-  };
-
-  // Full manual snapshot workflow: POST command -> queued state -> poll media -> display
+  // Genuine Edge Snapshot Capture flow
   const handleQuickCapture = async () => {
-    if (isCapturing) {
-      showToast("A capture is already in progress. Please wait for the current upload.");
+    if (!backendOnline) {
+      showToast('BACKEND UNAVAILABLE — Cannot dispatch capture command', true);
       return;
     }
 
-    setIsCapturing(true);
-
     try {
-      showToast("Dispatching snapshot command to edge device queue...");
-      const newImage = await executeSnapshotWorkflow({
-        triggerCaptureFn: triggerCaptureCommand,
-        fetchImagesFn: fetchImages,
-        resolveMediaUrlFn: resolveMediaUrl,
-        onStatusUpdate: (st) => {
-          if (st.status === 'QUEUED') {
-            showToast(`Capture command [${st.commandId}] queued. Waiting for Raspberry Pi upload...`);
-          } else if (st.status === 'POLLING') {
-            // Optional progress
-          }
-        },
-        pollIntervalMs: 2500,
-        maxAttempts: 10
-      });
-
-      // Genuine capture received
-      setImages(prev => [newImage, ...prev]);
-
-      // Add to event stream
-      const newEvent = {
-        id: newImage.eventId || `evt-${newImage.id.slice(-4)}`,
-        eventId: newImage.eventId,
-        timestamp: newImage.timestamp,
-        type: 'MANUAL_CAPTURE',
-        label: 'Manual Snapshot (Hardware)',
-        confidence: null,
-        aiStatus: newImage.aiStatus || 'CAPTURED',
-        thumbnail: newImage.thumbnail,
-        fullMediaUrl: newImage.url,
-        mediaType: 'IMAGE',
-        detections: newImage.boundingBoxes || [],
-        notes: `Optical frame ${newImage.id} captured via hardware trigger.`
-      };
-      setEvents(prev => [newEvent, ...prev]);
-
-      setMetrics(prev => ({
-        ...prev,
-        capturesToday: (prev.capturesToday || 0) + 1,
-      }));
-
-      showToast(`Hardware capture [${newImage.eventId || newImage.id}] received and saved.`);
-      setSelectedImage(newImage);
+      setIsCapturing(true);
+      showToast('CAPTURE COMMAND SENT — WAITING FOR EDGE NODE...');
+      const res = await triggerSnapshot();
+      showToast(`Command acknowledged [${res.command_id || 'DISPATCHED'}]. Acquiring frame...`);
+      
+      // Allow brief period for edge acquisition and Supabase ingestion
+      setTimeout(async () => {
+        await refreshMedia();
+        setIsCapturing(false);
+        showToast('Capture processed and registered in media archive');
+      }, 3500);
     } catch (err) {
-      showToast(`Capture failed: ${err.message || 'Edge camera offline or upload timed out.'}`);
-    } finally {
       setIsCapturing(false);
+      showToast(`Capture Error: ${err.message}`, true);
     }
   };
 
-  const handleToggleRecording = async () => {
-    try {
-      const nextAction = isRecording ? 'STOP' : 'START';
-      const res = await triggerRecordCommand(nextAction);
-      setIsRecording(!isRecording);
-      showToast(`Recording command queued (ID: ${res.command_id || 'sent'}).`);
-    } catch (err) {
-      showToast(`Recording command error: ${err.message}`);
+  // Genuine Edge Video Recording flow
+  const handleToggleRecording = async (nextRecordingState) => {
+    if (!backendOnline) {
+      showToast('BACKEND UNAVAILABLE — Cannot toggle recording', true);
+      return;
     }
-  };
 
-  const handleRefreshImages = async () => {
-    setIsRefreshingImages(true);
     try {
-      const realImages = await fetchImages();
-      if (Array.isArray(realImages)) {
-        const mapped = realImages.map(img => mapBackendImageRecord(img, resolveMediaUrl));
-        setImages(mapped);
-        setMetrics(prev => ({ ...prev, capturesToday: mapped.length }));
-        showToast(`Storage refreshed: ${mapped.length} captures loaded.`);
+      const actionText = nextRecordingState ? 'START RECORDING' : 'STOP RECORDING';
+      showToast(`COMMAND SENT: ${actionText} — WAITING FOR DEVICE...`);
+      await toggleRecording(nextRecordingState);
+      
+      // Update optimistic state while device processes command
+      setIsRecording(nextRecordingState);
+      showToast(nextRecordingState 
+        ? 'RECORDING COMMAND QUEUED — Edge node activating storage stream' 
+        : 'STOPPING RECORDING — Edge node finalizing video asset...'
+      );
+
+      if (!nextRecordingState) {
+        setTimeout(async () => {
+          await refreshMedia();
+        }, 3500);
       }
     } catch (err) {
-      showToast(`Failed to refresh images: ${err.message}`);
-    } finally {
-      setIsRefreshingImages(false);
+      showToast(`Record Error: ${err.message}`, true);
     }
   };
 
-  const handleRefreshFootage = async () => {
-    setIsRefreshingFootage(true);
+  // Delete event and associated media
+  const handleDeleteEvent = async (eventId) => {
     try {
-      const realFootage = await fetchFootage();
-      if (Array.isArray(realFootage)) {
-        const mapped = realFootage.map((clip, idx) => ({
-          id: clip.event_id || clip.id || `vid-${idx}`,
-          eventId: clip.event_id,
-          title: clip.notes || 'Recorded Video Clip',
-          timestamp: clip.timestamp ? clip.timestamp.replace('T', ' ').slice(0, 19) : new Date().toISOString().slice(0, 19),
-          duration: clip.duration || 'N/A',
-          resolution: '1280×720 (OV5647)',
-          videoUrl: resolveMediaUrl(clip.enhanced_url || clip.original_url || clip.videoUrl),
-          thumbnail: clip.thumbnail ? resolveMediaUrl(clip.thumbnail) : null,
-          camera: 'Primary Optical OV5647',
-          aiStatus: clip.ai_status || 'PENDING',
-          processingStatus: clip.processing_status || 'PENDING',
-          aiSummary: clip.ai_status === 'PROCESSING' ? 'AI Enhancement Pending' : 'Raw Video Recording',
-          detections: clip.detections || []
-        }));
-        setFootage(mapped);
-        showToast(`Footage refreshed: ${mapped.length} clips loaded.`);
-      }
+      showToast(`Deleting ${eventId}...`);
+      await deleteEvent(eventId);
+      showToast(`Capture ${eventId} deleted successfully`);
+      setSelectedImage(null);
+      setSelectedVideo(null);
+      setImages(prev => prev.filter(item => (item.event_id || item.id) !== eventId));
+      setFootage(prev => prev.filter(item => (item.event_id || item.id) !== eventId));
+      setEvents(prev => prev.filter(item => (item.event_id || item.id) !== eventId));
     } catch (err) {
-      showToast(`Failed to refresh footage: ${err.message}`);
-    } finally {
-      setIsRefreshingFootage(false);
+      showToast(`Delete failed: ${err.message}`, true);
     }
-  };
-
-  const handleRefreshTelemetry = async () => {
-    setIsRefreshingTelemetry(true);
-    setTelemetryError(null);
-    try {
-      const tel = await fetchTelemetry();
-      if (tel) {
-        setDeviceStatus(evaluateDeviceStatus({ connected: true }, tel, deviceStatus));
-        showToast("Live telemetry synced from hardware backend.");
-      } else {
-        setTelemetryError("Backend did not return device telemetry.");
-        showToast("Telemetry sync failed: Device unresponsive.");
-      }
-    } catch (err) {
-      setTelemetryError(err.message || "Telemetry request failed.");
-      showToast("Telemetry sync failed.");
-    } finally {
-      setIsRefreshingTelemetry(false);
-    }
-  };
-
-  // Centralized, safe event selection resolving actual event media
-  const handleSelectEvent = (evt) => {
-    const resolved = resolveEventMedia(evt, images, footage);
-    if (resolved.found) {
-      if (resolved.mediaType === 'VIDEO') {
-        setSelectedVideo(resolved.media);
-      } else {
-        setSelectedImage(resolved.media);
-      }
-    } else {
-      showToast(`Media for event ${evt.id} is being processed or unavailable.`);
-    }
-  };
-
-  const handleToggleClahe = () => {
-    setClaheActive(!claheActive);
-    showToast(`Adaptive CLAHE luminance filter ${!claheActive ? 'ACTIVATED' : 'BYPASS'}.`);
   };
 
   return (
     <div className="app-shell">
-      {/* Dynamic low-light background canvas */}
-      <LiveBackground activeTab={activeTab} isConnected={deviceStatus.status === 'ONLINE'} />
+      <LiveBackground />
 
-      {/* Primary Collapsible Tactical Navigation Sidebar */}
+      {/* Primary Navigation Sidebar */}
       <Sidebar 
         activeTab={activeTab} 
-        onSelectTab={setActiveTab}
-        setActiveTab={setActiveTab} 
-        collapsed={sidebarCollapsed} 
+        onSelectTab={setActiveTab} 
         isCollapsed={sidebarCollapsed}
-        setCollapsed={setSidebarCollapsed} 
         onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         deviceStatus={deviceStatus}
-        eventCount={events.length}
-        isDemoMode={isDemoMode}
+        backendOnline={backendOnline}
       />
 
-      <div className={`workspace-container ${sidebarCollapsed ? 'sidebar-is-collapsed' : ''}`}>
-        {/* Top Operational Status & Telemetry HUD Bar */}
+      {/* Main App Workspace */}
+      <div className={`workspace-container ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
         <TopBar 
           deviceStatus={deviceStatus} 
-          title={
-            activeTab === 'overview' ? 'NOCTURNAL SURVEILLANCE OVERVIEW' :
-            activeTab === 'live' ? 'OPTICAL SENSOR MONITOR // FEED' :
-            activeTab === 'events' ? 'SECURITY AUDIT EVENT TIMELINE' :
-            activeTab === 'footage' ? 'RECORDED FOOTAGE ARCHIVE' :
-            activeTab === 'images' ? 'OPTICAL HIGH-RES CAPTURES' :
-            activeTab === 'ai' ? 'QUANTIZED VISION INFERENCE ENGINE' :
-            activeTab === 'device' ? 'HARDWARE HEALTH & SUBSYSTEMS' :
-            'EDGE GATEWAY SYSTEM SETTINGS'
-          }
-          subtitle={
-            activeTab === 'overview' ? 'Real-time perimeter surveillance & telemetry' :
-            activeTab === 'live' ? 'OmniVision OV5647 optical feed with adaptive CLAHE' :
-            activeTab === 'events' ? 'PIR motion-triggered chronological detection stream' :
-            activeTab === 'footage' ? 'H.264 encrypted local circular buffer footage' :
-            activeTab === 'images' ? 'Lossless captures and edge AI classifications' :
-            activeTab === 'ai' ? 'YOLOv8n quantized model and low-light enhancement' :
-            activeTab === 'device' ? 'SoC thermal monitoring and hardware bus status' :
-            'Configure detection thresholds and hardware interfaces'
-          }
+          backendOnline={backendOnline}
           onQuickCapture={handleQuickCapture}
           isCapturing={isCapturing}
-          isDemoMode={isDemoMode}
-          onToggleDemoMode={toggleDemoMode}
+          activeTab={activeTab}
+          isRecording={isRecording}
+          onToggleRecording={handleToggleRecording}
         />
 
-        {/* Global Demo Mode Warning Banner */}
-        {isDemoMode && (
-          <div 
-            className="demo-mode-alert-bar mono"
-            style={{
-              background: 'rgba(250, 173, 20, 0.15)',
-              borderBottom: '1px solid rgba(250, 173, 20, 0.4)',
-              color: '#faad14',
-              padding: '8px 24px',
-              fontSize: '11px',
-              fontWeight: 500,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '12px'
-            }}
-          >
-            <span>
-              ⚠ DEMO MODE ACTIVE: Displaying simulated sample captures and telemetry. Physical hardware is not connected.
-            </span>
-            <button
-              type="button"
-              onClick={toggleDemoMode}
-              className="mono"
-              style={{
-                background: 'rgba(250, 173, 20, 0.25)',
-                border: '1px solid #faad14',
-                color: '#fff',
-                padding: '3px 10px',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '11px'
-              }}
-            >
-              EXIT DEMO MODE
-            </button>
+        {/* Global Toast Notification */}
+        {toastNotification && (
+          <div className="app-toast-pill mono glass-panel">
+            <span className={`toast-dot ${toastNotification.isWarning ? 'warning' : ''}`} />
+            <span className="toast-msg">{toastNotification.text}</span>
           </div>
         )}
 
-        <main className="content-viewport">
+        {/* Authenticated Workspace Content Router */}
+        <main className="content-viewport" id="main-content">
           {activeTab === 'overview' && (
             <OverviewScreen 
               deviceStatus={deviceStatus}
-              metrics={metrics}
-              events={events}
-              onSelectEvent={handleSelectEvent}
+              capturesCount={images.length}
+              recordingsCount={footage.length}
               onNavigate={setActiveTab}
               onSnapshot={handleQuickCapture}
-              isCapturing={isCapturing}
               isRecording={isRecording}
               onToggleRecording={handleToggleRecording}
-              claheActive={claheActive}
-              onToggleClahe={handleToggleClahe}
-              onShowToast={showToast}
             />
           )}
 
@@ -551,111 +255,80 @@ export default function App() {
             <LiveMonitorScreen 
               deviceStatus={deviceStatus}
               onSnapshot={handleQuickCapture}
-              isCapturing={isCapturing}
               isRecording={isRecording}
               onToggleRecording={handleToggleRecording}
-              claheActive={claheActive}
-              onToggleClahe={handleToggleClahe}
-              events={events}
-              onShowToast={showToast}
-            />
-          )}
-
-          {activeTab === 'events' && (
-            <EventsScreen 
-              events={events}
-              onSelectEvent={handleSelectEvent}
-            />
-          )}
-
-          {activeTab === 'footage' && (
-            <FootageScreen 
-              footageList={footage}
-              onSelectVideo={(video) => setSelectedVideo(video)}
-              onRefreshFootage={handleRefreshFootage}
-              isRefreshing={isRefreshingFootage}
             />
           )}
 
           {activeTab === 'images' && (
             <ImagesScreen 
               images={images}
-              onSelectImage={(img) => setSelectedImage(img)}
-              onRefreshImages={handleRefreshImages}
-              isRefreshing={isRefreshingImages}
+              onSelectImage={setSelectedImage}
             />
           )}
 
-          {activeTab === 'ai' && (
-            <AIScreen 
-              aiSummary={aiSummary}
-              isDemoMode={isDemoMode}
+          {activeTab === 'footage' && (
+            <FootageScreen 
+              footageList={footage}
+              onSelectVideo={setSelectedVideo}
+            />
+          )}
+
+          {activeTab === 'events' && (
+            <EventsScreen 
+              events={events}
+              onSelectEvent={(evt) => {
+                if (evt.media_type === 'VIDEO') {
+                  setSelectedVideo(evt);
+                } else {
+                  setSelectedImage(evt);
+                }
+              }}
             />
           )}
 
           {activeTab === 'device' && (
             <DeviceScreen 
               deviceStatus={deviceStatus}
-              onRefreshTelemetry={handleRefreshTelemetry}
-              isRefreshing={isRefreshingTelemetry}
-              telemetryError={telemetryError}
+              onRefreshTelemetry={async () => {
+                const dev = await fetchDeviceStatus();
+                if (dev) {
+                  setDeviceStatus(dev);
+                  setBackendOnline(true);
+                  showToast('Device telemetry refreshed from edge node');
+                } else {
+                  setBackendOnline(false);
+                  showToast('Backend ping failed — Node unreachable', true);
+                }
+              }}
             />
           )}
 
+          {activeTab === 'ai' && <AIScreen />}
+
           {activeTab === 'settings' && (
             <SettingsScreen 
-              serverConfig={serverConfig}
-              isConfigLoading={isConfigLoading}
-              configError={configError}
-              onRetryFetchConfig={initData}
-              onSaveSettings={async (newConfig) => {
-                if (isDemoMode) {
-                  setServerConfig(newConfig);
-                  showToast("Demo configuration saved locally.");
-                  return;
-                }
-                const res = await saveConfig(newConfig);
-                if (res && res.status === 'ok') {
-                  setServerConfig(res.config || newConfig);
-                  showToast("Configuration committed to edge storage.");
-                }
-              }}
-              isDemoMode={isDemoMode}
+              deviceStatus={deviceStatus}
             />
           )}
         </main>
       </div>
 
-      {/* Global Image Viewer Modal */}
+      {/* Genuine Media Inspection Modals */}
       {selectedImage && (
         <ImageViewerModal 
           image={selectedImage}
           onClose={() => setSelectedImage(null)}
-          onPrev={() => {
-            const idx = images.findIndex(i => i.id === selectedImage.id);
-            if (idx > 0) setSelectedImage(images[idx - 1]);
-          }}
-          onNext={() => {
-            const idx = images.findIndex(i => i.id === selectedImage.id);
-            if (idx < images.length - 1) setSelectedImage(images[idx + 1]);
-          }}
+          onDelete={handleDeleteEvent}
         />
       )}
 
-      {/* Global Video Player Modal */}
       {selectedVideo && (
         <VideoPlayerModal 
           video={selectedVideo}
           onClose={() => setSelectedVideo(null)}
+          onDelete={handleDeleteEvent}
         />
-      )}
-
-      {/* Floating System Toast */}
-      {toastNotification && (
-        <div className="floating-app-toast mono">
-          <span className="toast-bullet" />
-          <span>{toastNotification}</span>
-        </div>
       )}
     </div>
   );

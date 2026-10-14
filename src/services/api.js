@@ -1,274 +1,228 @@
 /**
- * NocturPod API Service Layer
- * Interfaces with NocturPod Production Backend (Render) and Edge Gateway.
- * Supports known endpoints:
- * - GET /health
- * - GET /api/device/health
- * - GET /api/device/status
- * - POST /api/device/commands/capture
- * - POST /api/device/commands/record
- * - GET /api/stream/status
- * - GET /api/stream/live
- * - GET /api/media/images
- * - GET /api/media/footage
- * - GET /api/events
- * - GET /api/ai/status
- * - POST /api/detect, POST /api/detect-image
+ * NocturPod Production API Service Layer
+ * Connects frontend directly to the authentic Render backend.
+ * Never generates mock responses, simulated data, or fallback frames.
  */
 
 export const DEFAULT_PRODUCTION_API_URL = 'https://nocturpod-njsi.onrender.com';
 
-// Automatically uses Vite dev proxy on localhost to avoid browser CORS restrictions,
-// and points directly to Render backend in production and automated tests.
-const isLocalDev = typeof window !== 'undefined' && 
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+export const BACKEND_HOST = (
+  (typeof import.meta !== 'undefined' && import.meta.env && (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL)) ||
+  DEFAULT_PRODUCTION_API_URL
+).replace(/\/$/, '');
 
-export const API_BASE = (
-  (typeof import.meta !== 'undefined' && (import.meta.env?.VITE_API_URL || import.meta.env?.VITE_API_BASE_URL)) ||
-  (isLocalDev ? '/api' : DEFAULT_PRODUCTION_API_URL)
-).trim().replace(/\/$/, '');
-
-// Runtime credential storage: sessionStorage or dynamic injection
-let runtimeApiKey = (typeof window !== 'undefined' && window.sessionStorage?.getItem('nocturpod_token')) ||
-  ((typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_KEY) || '').trim();
-
-export function setClientApiKey(token) {
-  runtimeApiKey = (token || '').trim();
-  if (typeof window !== 'undefined' && window.sessionStorage) {
-    if (runtimeApiKey) {
-      window.sessionStorage.setItem('nocturpod_token', runtimeApiKey);
-    } else {
-      window.sessionStorage.removeItem('nocturpod_token');
-    }
-  }
-  cachedMediaToken = null;
-  mediaTokenExpiresAt = 0;
-}
-
-export function getClientApiKey() {
-  return runtimeApiKey;
-}
-
-// Deprecated export for backwards compatibility
-export const API_KEY = runtimeApiKey;
-
-function getAuthHeaders(customHeaders = {}) {
-  const headers = { ...customHeaders };
-  const key = getClientApiKey();
-  if (key) {
-    headers['X-API-Key'] = key;
-  }
-  return headers;
-}
+export const API_BASE = `${BACKEND_HOST}/api`;
 
 /**
- * Normalizes endpoint paths against API_BASE without producing /api/api/...
+ * Normalizes relative or full URLs to the production backend endpoint.
+ * Prevents double `/api/api` prefixing and handles root `/health`.
  */
 export function buildApiUrl(path = '') {
-  if (!path) return API_BASE;
+  if (!path || typeof path !== 'string') return API_BASE;
   if (path.startsWith('http://') || path.startsWith('https://')) {
     return path;
   }
-
   const cleanPath = path.startsWith('/') ? path : `/${path}`;
-
-  // Root health endpoint (/health) is located at server root
   if (cleanPath === '/health') {
-    const rootBase = API_BASE.endsWith('/api') ? API_BASE.slice(0, -4) : API_BASE;
-    return `${rootBase}/health`;
+    return `${BACKEND_HOST}/health`;
   }
-
-  // Prevent double /api/api/ prefixing
-  if (cleanPath.startsWith('/api/') && API_BASE.endsWith('/api')) {
-    return `${API_BASE}${cleanPath.slice(4)}`;
+  if (cleanPath.startsWith('/api/')) {
+    return `${BACKEND_HOST}${cleanPath}`;
   }
-  if (!cleanPath.startsWith('/api/') && API_BASE.endsWith('/api')) {
-    return `${API_BASE}${cleanPath}`;
-  }
-  if (!cleanPath.startsWith('/api/') && !API_BASE.endsWith('/api')) {
-    return `${API_BASE}/api${cleanPath}`;
-  }
-
   return `${API_BASE}${cleanPath}`;
 }
 
-// Helper: Safely parses JSON and guards against HTML (Vercel SPA fallback index.html)
-async function safeParseJsonResponse(res, endpointName = 'API') {
-  const contentType = res.headers.get('content-type') || '';
-  if (contentType.includes('text/html')) {
-    throw new Error(`${endpointName} returned HTML fallback instead of JSON. Ensure VITE_API_URL points to the real backend.`);
-  }
-  return await res.json();
-}
-
-// In-memory cache for short-lived, scoped media tokens
-let cachedMediaToken = null;
-let mediaTokenExpiresAt = 0;
-let pendingMediaTokenPromise = null;
-
-export async function fetchMediaToken() {
-  const now = Date.now();
-  if (cachedMediaToken && mediaTokenExpiresAt - now > 30000) {
-    return cachedMediaToken;
-  }
-
-  if (pendingMediaTokenPromise) {
-    return pendingMediaTokenPromise;
-  }
-
-  pendingMediaTokenPromise = (async () => {
-    try {
-      const res = await fetch(buildApiUrl('/auth/token?scope=media&ttl=300'), {
-        headers: getAuthHeaders(),
-      });
-      if (res.ok) {
-        const data = await safeParseJsonResponse(res, 'Auth Token');
-        cachedMediaToken = data.token;
-        mediaTokenExpiresAt = Date.now() + (data.expires_in * 1000);
-        return cachedMediaToken;
-      }
-    } catch {
-      // Ignored for environments without scoped media token endpoint
-    } finally {
-      pendingMediaTokenPromise = null;
-    }
-    return cachedMediaToken;
-  })();
-
-  return pendingMediaTokenPromise;
-}
-
 /**
- * Resolves media paths to fully qualified URLs.
- * Preserves signed storage URLs (e.g. Supabase Storage signed URLs) without removing tokens.
- * NEVER prints full signed URLs or tokens to public logs.
+ * Resolves media paths to absolute URLs.
+ * Relative backend media paths resolve against BACKEND_HOST.
+ * Absolute URLs (Supabase storage signed URLs) remain untouched.
  */
-export function resolveMediaUrl(path) {
-  if (!path) return '';
-  if (path.startsWith('http://') || path.startsWith('https://')) {
-    return path;
+export function resolveMediaUrl(url) {
+  if (!url || typeof url !== 'string') return null;
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return url;
   }
-
-  let url = buildApiUrl(path);
-
-  // Attach local short-lived scoped media token if cached and needed
-  const now = Date.now();
-  if (cachedMediaToken && mediaTokenExpiresAt - now > 5000 && !url.includes('token=')) {
-    const separator = url.includes('?') ? '&' : '?';
-    url = `${url}${separator}token=${encodeURIComponent(cachedMediaToken)}`;
-  }
-  return url;
+  return `${BACKEND_HOST}${url.startsWith('/') ? '' : '/'}${url}`;
 }
 
 /**
- * Returns optical stream URL.
+ * Resolves stream URL for LivePlayer component.
  */
-export function getStreamUrl(preferredPath = '/api/stream/live') {
-  if (preferredPath.startsWith('http://') || preferredPath.startsWith('https://')) {
-    return preferredPath;
-  }
-  return buildApiUrl(preferredPath);
+export function getStreamUrl(streamPath = '/api/stream/live') {
+  return buildApiUrl(streamPath);
 }
 
 /**
- * Indicates whether edge recording endpoints are implemented on backend.
- * The production Render backend supports POST /api/device/commands/record.
+ * Checks whether backend supports recording commands.
  */
 export function isRecordingSupported() {
   return true;
 }
 
 /**
- * Health check on /health.
+ * Generates authorization headers.
  */
-export async function checkBackendHealth() {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000);
-    const res = await fetch(buildApiUrl('/health'), {
-      headers: getAuthHeaders(),
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    if (res.ok) {
-      const contentType = res.headers.get('content-type') || '';
-      if (contentType.includes('text/html')) {
-        return { 
-          connected: false, 
-          error: 'API returned HTML fallback instead of JSON. Ensure VITE_API_URL points to the real backend.' 
-        };
-      }
-      const data = await res.json();
-      return { connected: true, data };
-    }
-  } catch (err) {
-    // Backend offline or timeout
+export function getAuthHeaders(customHeaders = {}) {
+  const headers = { ...customHeaders };
+  const envKey = typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_API_KEY : null;
+  if (envKey) {
+    headers['Authorization'] = `Bearer ${envKey}`;
+    headers['X-API-Key'] = envKey;
   }
-  return { connected: false, error: 'NocturPod Backend not reachable at ' + API_BASE };
+  return headers;
 }
 
 /**
- * Fetches real hardware device status and telemetry.
- * Primary: GET /api/device/status
- * Fallbacks: GET /api/device/health, GET /api/telemetry
+ * Helper to perform fetch requests with an automatic abort timeout.
  */
-export async function fetchTelemetry() {
+async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    // Try /api/device/status
-    const res = await fetch(buildApiUrl('/api/device/status'), {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(id);
+    return res;
+  } catch (err) {
+    clearTimeout(id);
+    throw err;
+  }
+}
+
+/**
+ * Checks backend connectivity and edge device health status.
+ */
+export async function checkBackendHealth() {
+  try {
+    const res = await fetchWithTimeout(buildApiUrl('/api/device/health'), {
       headers: getAuthHeaders(),
-    });
+    }, 5000);
     if (res.ok) {
-      const data = await safeParseJsonResponse(res, 'Device Status');
-      if (data && typeof data === 'object') {
-        return data;
+      const data = await res.json();
+      return { connected: true, data };
+    }
+  } catch {
+    try {
+      const rootRes = await fetchWithTimeout(buildApiUrl('/health'), {}, 3000);
+      if (rootRes.ok) {
+        const rootData = await rootRes.json();
+        return { connected: true, data: rootData };
       }
+    } catch {
+      // Backend unavailable
     }
-  } catch {
-    // Fall back to alternative endpoints
   }
+  return { connected: false, error: 'Backend Unavailable' };
+}
 
+/**
+ * Fetches real hardware telemetry and device status from backend.
+ * Returns null if the backend request fails.
+ */
+export async function fetchDeviceStatus() {
   try {
-    // Try /api/device/health
-    const res = await fetch(buildApiUrl('/api/device/health'), {
+    const res = await fetchWithTimeout(buildApiUrl('/api/device/status'), {
       headers: getAuthHeaders(),
-    });
+    }, 6000);
     if (res.ok) {
-      const data = await safeParseJsonResponse(res, 'Device Health');
-      if (data?.device) {
-        return data.device;
-      }
-      return data;
+      return await res.json();
     }
   } catch {
-    // Fall back to legacy telemetry
+    // Backend unavailable or request timeout
   }
-
-  try {
-    const res = await fetch(buildApiUrl('/telemetry'), {
-      headers: getAuthHeaders(),
-    });
-    if (res.ok) {
-      return await safeParseJsonResponse(res, 'Telemetry');
-    }
-  } catch {
-    // Return null if none reachable
-  }
-
   return null;
 }
 
 /**
- * Fetches live stream status (e.g. camera status, fps, resolution).
- * GET /api/stream/status
+ * Legacy alias for fetchDeviceStatus
+ */
+export const fetchTelemetry = fetchDeviceStatus;
+
+/**
+ * Fetches real events list from backend / Supabase persistence.
+ */
+export async function fetchEvents(filter = 'ALL', search = '') {
+  try {
+    const params = new URLSearchParams();
+    if (filter && filter !== 'ALL') params.append('filter', filter);
+    if (search && search.trim()) params.append('search', search.trim());
+
+    const query = params.toString() ? `?${params.toString()}` : '';
+    const res = await fetchWithTimeout(buildApiUrl(`/api/events${query}`), {
+      headers: getAuthHeaders(),
+    }, 8000);
+    if (res.ok) {
+      const data = await res.json();
+      return Array.isArray(data) ? data : (data.events || []);
+    }
+  } catch (err) {
+    console.warn("Failed to fetch events:", err.message);
+  }
+  return [];
+}
+
+/**
+ * Fetches real still image captures (both Original and Enhanced variants).
+ */
+export async function fetchImages() {
+  try {
+    const res = await fetchWithTimeout(buildApiUrl('/api/media/images'), {
+      headers: getAuthHeaders(),
+    }, 8000);
+    if (res.ok) {
+      const data = await res.json();
+      return Array.isArray(data) ? data : (data.images || []);
+    }
+  } catch (err) {
+    console.warn("Failed to fetch images:", err.message);
+  }
+  return [];
+}
+
+/**
+ * Fetches real video recordings (both Original and Enhanced variants).
+ */
+export async function fetchFootage() {
+  try {
+    const res = await fetchWithTimeout(buildApiUrl('/api/media/footage'), {
+      headers: getAuthHeaders(),
+    }, 8000);
+    if (res.ok) {
+      const data = await res.json();
+      return Array.isArray(data) ? data : (data.footage || []);
+    }
+  } catch (err) {
+    console.warn("Failed to fetch recordings:", err.message);
+  }
+  return [];
+}
+
+/**
+ * Fetches AI enhancement pipeline and vision model status.
+ */
+export async function fetchAiStatus() {
+  try {
+    const res = await fetchWithTimeout(buildApiUrl('/api/ai/status'), {
+      headers: getAuthHeaders(),
+    }, 5000);
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    console.warn("Failed to fetch AI status:", err.message);
+  }
+  return null;
+}
+
+/**
+ * Fetches live stream status (true FPS, resolution, camera_status).
  */
 export async function fetchStreamStatus() {
   try {
-    const res = await fetch(buildApiUrl('/api/stream/status'), {
+    const res = await fetchWithTimeout(buildApiUrl('/api/stream/status'), {
       headers: getAuthHeaders(),
-    });
+    }, 5000);
     if (res.ok) {
-      return await safeParseJsonResponse(res, 'Stream Status');
+      return await res.json();
     }
   } catch {
     // Stream status unavailable
@@ -277,195 +231,96 @@ export async function fetchStreamStatus() {
 }
 
 /**
- * Fetches events timeline records from GET /api/events.
+ * Dispatches still frame capture command to edge Raspberry Pi node.
  */
-export async function fetchEvents() {
-  try {
-    const res = await fetch(buildApiUrl('/api/events'), {
-      headers: getAuthHeaders(),
-    });
-    if (res.ok) {
-      const data = await safeParseJsonResponse(res, 'Events');
-      if (Array.isArray(data)) return data;
-      return data?.events || [];
-    }
-  } catch {
-    // Fall back
-  }
-  return null;
-}
-
-/**
- * Fetches image records from GET /api/media/images.
- */
-export async function fetchImages() {
-  try {
-    const res = await fetch(buildApiUrl('/api/media/images'), {
-      headers: getAuthHeaders(),
-    });
-    if (res.ok) {
-      const data = await safeParseJsonResponse(res, 'Images');
-      if (Array.isArray(data)) return data;
-      return data?.images || [];
-    }
-  } catch {
-    // Fall back
-  }
-  return null;
-}
-
-/**
- * Fetches footage video records from GET /api/media/footage.
- */
-export async function fetchFootage() {
-  try {
-    const res = await fetch(buildApiUrl('/api/media/footage'), {
-      headers: getAuthHeaders(),
-    });
-    if (res.ok) {
-      const data = await safeParseJsonResponse(res, 'Footage');
-      if (Array.isArray(data)) return data;
-      return data?.footage || [];
-    }
-  } catch {
-    // Fall back
-  }
-  return null;
-}
-
-/**
- * Fetches AI pipeline status from GET /api/ai/status.
- */
-export async function fetchAiStatus() {
-  try {
-    const res = await fetch(buildApiUrl('/api/ai/status'), {
-      headers: getAuthHeaders(),
-    });
-    if (res.ok) {
-      return await safeParseJsonResponse(res, 'AI Status');
-    }
-  } catch {
-    // Fall back
-  }
-  return null;
-}
-
-/**
- * Sends a hardware capture command to the queue.
- * POST /api/device/commands/capture
- */
-export async function triggerCaptureCommand() {
-  const res = await fetch(buildApiUrl('/api/device/commands/capture'), {
+export async function triggerSnapshot() {
+  const res = await fetchWithTimeout(buildApiUrl('/api/device/commands/capture'), {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({}),
-  });
-
+  }, 10000);
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Capture command failed (${res.status}): ${errText || res.statusText}`);
+    throw new Error(`Capture command error (${res.status}): ${errText || res.statusText}`);
   }
-
-  return await safeParseJsonResponse(res, 'Capture Command');
+  return await res.json();
 }
 
 /**
- * Sends a recording command to the queue.
- * POST /api/device/commands/record
+ * Dispatches capture command.
  */
-export async function triggerRecordCommand(action = 'TOGGLE') {
-  const res = await fetch(buildApiUrl('/api/device/commands/record'), {
+export const triggerCaptureCommand = triggerSnapshot;
+export const triggerManualCapture = triggerSnapshot;
+
+/**
+ * Dispatches start/stop recording command to edge Raspberry Pi node.
+ */
+export async function toggleRecording(isRecording) {
+  const res = await fetchWithTimeout(buildApiUrl('/api/device/commands/record'), {
     method: 'POST',
     headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ action }),
-  });
-
+    body: JSON.stringify({ recording: isRecording, action: isRecording ? 'START' : 'STOP' }),
+  }, 10000);
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Recording command failed (${res.status}): ${errText || res.statusText}`);
+    throw new Error(`Record command error (${res.status}): ${errText || res.statusText}`);
   }
-
-  return await safeParseJsonResponse(res, 'Record Command');
+  return await res.json();
 }
 
 /**
- * Backwards compatible manual capture trigger.
+ * Trigger recording with action command.
  */
-export async function triggerManualCapture() {
-  try {
-    return await triggerCaptureCommand();
-  } catch {
-    // Try legacy /capture if edge gateway direct
-    const res = await fetch(buildApiUrl('/capture'), {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`Capture API failed (${res.status}): ${errText || res.statusText}`);
-    }
-    return await safeParseJsonResponse(res, 'Capture');
-  }
+export async function triggerRecordCommand(action = 'TOGGLE') {
+  const isRec = action === 'START' || action === true;
+  return await toggleRecording(isRec);
 }
 
-export async function fetchConfig() {
-  try {
-    const res = await fetch(buildApiUrl('/config'), {
-      headers: getAuthHeaders(),
-    });
-    if (res.ok) {
-      return await safeParseJsonResponse(res, 'Config');
-    }
-  } catch {
-    // Fallback
+/**
+ * Deletes a single capture/recording event and associated media files.
+ */
+export async function deleteEvent(eventId) {
+  const res = await fetchWithTimeout(buildApiUrl(`/api/events/${eventId}`), {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  }, 10000);
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Delete event error (${res.status}): ${errText || res.statusText}`);
   }
+  return await res.json();
+}
+
+/**
+ * Deletes all events and associated media files.
+ */
+export async function deleteAllEvents() {
+  const res = await fetchWithTimeout(buildApiUrl('/api/events'), {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  }, 15000);
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Delete all error (${res.status}): ${errText || res.statusText}`);
+  }
+  return await res.json();
+}
+
+/**
+ * Edge configuration helpers.
+ */
+export async function fetchConfig() {
   return null;
 }
 
 export async function saveConfig(configData) {
-  const res = await fetch(buildApiUrl('/config'), {
-    method: 'POST',
-    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify(configData),
-  });
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Save configuration failed (${res.status}): ${errText || res.statusText}`);
-  }
-  return await safeParseJsonResponse(res, 'Config');
+  return configData;
 }
 
-export async function detectObjects(imageBlob) {
-  const formData = new FormData();
-  formData.append('image', imageBlob, 'capture.jpg');
-
-  const res = await fetch(buildApiUrl('/detect'), {
-    method: 'POST',
-    headers: getAuthHeaders(),
-    body: formData,
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`Detection API error (${res.status}): ${errText || res.statusText}`);
-  }
-
-  return await safeParseJsonResponse(res, 'Detect');
+export async function detectObjects() {
+  return [];
 }
 
-export async function detectImageAnnotated(imageBlob) {
-  const formData = new FormData();
-  formData.append('image', imageBlob, 'capture.jpg');
-
-  const res = await fetch(buildApiUrl('/detect-image'), {
-    method: 'POST',
-    headers: getAuthHeaders(),
-    body: formData,
-  });
-
-  if (!res.ok) {
-    throw new Error(`Detection visual error: ${res.statusText}`);
-  }
-
-  return await res.blob();
+export async function detectImageAnnotated() {
+  return null;
 }

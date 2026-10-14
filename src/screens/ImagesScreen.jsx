@@ -1,234 +1,113 @@
 import React, { useState } from 'react';
 import { 
   Search, 
-  Camera, 
-  Sparkles, 
-  Crosshair,
   Maximize2,
-  RefreshCw,
-  ImageOff
+  Image as ImageIcon,
+  Clock,
+  CheckCircle2
 } from 'lucide-react';
+import { resolveMediaUrl } from '../services/api';
 import './ImagesScreen.css';
 
-export default function ImagesScreen({ 
-  images = [], 
-  onSelectImage, 
-  onRefreshImages, 
-  isRefreshing = false 
-}) {
-  const [filterTag, setFilterTag] = useState('ALL');
+export default function ImagesScreen({ images = [], onSelectImage }) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [brokenImages, setBrokenImages] = useState(new Set());
-
-  const handleImageError = (id) => {
-    setBrokenImages((prev) => new Set(prev).add(id));
-  };
 
   const filtered = images.filter((img) => {
-    if (filterTag !== 'ALL' && img.aiTag !== filterTag) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      const titleMatch = (img.title || '').toLowerCase().includes(q);
-      const timeMatch = (img.timestamp || '').toLowerCase().includes(q);
-      const eventMatch = (img.eventId || img.id || '').toLowerCase().includes(q);
-      const tagMatch = (img.aiTag || '').toLowerCase().includes(q);
-      return titleMatch || timeMatch || eventMatch || tagMatch;
+      const eventId = (img.event_id || img.id || '').toLowerCase();
+      const notes = (img.notes || '').toLowerCase();
+      return eventId.includes(q) || notes.includes(q);
     }
     return true;
   });
 
   return (
     <div className="images-screen-container">
-      {/* Top Filter and Search Bar */}
+      {/* Top Search Bar */}
       <div className="images-filter-bar glass-panel">
         <div className="img-chips">
-          <button 
-            type="button"
-            className={`img-chip mono ${filterTag === 'ALL' ? 'active' : ''}`}
-            onClick={() => setFilterTag('ALL')}
-          >
-            ALL CAPTURES ({images.length})
-          </button>
-          <button 
-            type="button"
-            className={`img-chip mono ${filterTag === 'Person' ? 'active' : ''}`}
-            onClick={() => setFilterTag('Person')}
-          >
-            PERSON
-          </button>
-          <button 
-            type="button"
-            className={`img-chip mono ${filterTag === 'Vehicle' ? 'active' : ''}`}
-            onClick={() => setFilterTag('Vehicle')}
-          >
-            VEHICLE
-          </button>
-          <button 
-            type="button"
-            className={`img-chip mono ${filterTag === 'Manual' ? 'active' : ''}`}
-            onClick={() => setFilterTag('Manual')}
-          >
-            MANUAL SNAPSHOTS
-          </button>
-          <button 
-            type="button"
-            className={`img-chip mono ${filterTag === 'Animal' ? 'active' : ''}`}
-            onClick={() => setFilterTag('Animal')}
-          >
-            ANIMAL / LOW-CONF
-          </button>
+          <span className="chips-title mono">GENUINE CAPTURES: {images.length}</span>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          {onRefreshImages && (
-            <button 
-              type="button"
-              className="img-chip mono"
-              onClick={onRefreshImages}
-              disabled={isRefreshing}
-              title="Refresh captured images from backend storage"
-              style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
-            >
-              <RefreshCw size={12} className={isRefreshing ? 'spin-icon' : ''} />
-              <span>{isRefreshing ? 'REFRESHING...' : 'REFRESH'}</span>
-            </button>
-          )}
-
-          <div className="search-wrap">
-            <Search size={14} className="search-icon" />
-            <input 
-              type="text" 
-              className="search-input mono"
-              placeholder="Search captures by ID, time, title..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
+        <div className="search-wrap">
+          <Search size={14} className="search-icon" />
+          <input 
+            type="text" 
+            className="search-input mono"
+            placeholder="Search captures by Event ID..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
         </div>
       </div>
 
       {/* Grid of captures */}
       {filtered.length === 0 ? (
-        <div 
-          className="glass-panel mono" 
-          style={{ 
-            padding: '60px 20px', 
-            textAlign: 'center', 
-            color: 'var(--color-muted-sage)',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: '12px'
-          }}
-        >
-          <Camera size={40} style={{ opacity: 0.5 }} />
-          <span style={{ fontSize: '13px', letterSpacing: '0.05em', color: 'var(--color-light-green)' }}>
-            NO CAPTURES RECORDED
-          </span>
-          <p style={{ fontSize: '11px', maxWidth: '420px', margin: 0, opacity: 0.8 }}>
-            No images found matching criteria. Trigger a snapshot using the header button or check back when motion occurs.
+        <div className="empty-state-panel glass-panel">
+          <ImageIcon size={40} className="empty-icon" />
+          <h3 className="empty-title">NO CAPTURES YET</h3>
+          <p className="empty-sub mono">
+            Trigger a manual capture from the Live Monitor to generate genuine OV5647 stills.
           </p>
-          {onRefreshImages && (
-            <button
-              type="button"
-              onClick={onRefreshImages}
-              className="img-chip mono active"
-              style={{ marginTop: '8px', cursor: 'pointer' }}
-            >
-              RE-SYNC STORAGE
-            </button>
-          )}
         </div>
       ) : (
         <div className="images-masonry-grid">
           {filtered.map((item) => {
-            const isBroken = brokenImages.has(item.id);
-            const displayUrl = item.thumbnail || item.url || item.originalUrl;
+            const isEnhanced = item.processing_status === 'COMPLETE' && item.enhanced_url;
+            const isProcessing = item.processing_status === 'PROCESSING' || item.processing_status === 'PENDING';
+            const rawDisplayUrl = isEnhanced ? item.enhanced_url : (item.original_url || item.thumbnail);
+            const displayUrl = resolveMediaUrl(rawDisplayUrl);
 
             return (
               <div 
-                key={item.id} 
+                key={item.event_id || item.id} 
                 className="image-card glass-panel"
-                onClick={() => onSelectImage && onSelectImage(item)}
+                onClick={() => onSelectImage(item)}
                 role="button"
                 tabIndex={0}
               >
                 <div className="img-preview-box">
-                  {displayUrl && !isBroken ? (
-                    <img 
-                      src={displayUrl} 
-                      alt={item.title || 'Camera snapshot'} 
-                      loading="lazy" 
-                      onError={() => handleImageError(item.id)}
-                    />
+                  {displayUrl ? (
+                    <img src={displayUrl} alt={item.event_id || 'Capture'} loading="lazy" />
                   ) : (
-                    <div 
-                      style={{ 
-                        width: '100%', 
-                        height: '100%', 
-                        display: 'flex', 
-                        flexDirection: 'column', 
-                        alignItems: 'center', 
-                        justifyContent: 'center', 
-                        background: '#041718',
-                        color: 'var(--color-muted-sage)',
-                        gap: '6px'
-                      }}
-                    >
-                      <ImageOff size={24} style={{ opacity: 0.6 }} />
-                      <span className="mono" style={{ fontSize: '9px', opacity: 0.7 }}>
-                        {isBroken ? 'MEDIA ACCESS EXPIRED' : 'IMAGE PENDING'}
-                      </span>
+                    <div className="placeholder-preview mono">
+                      <Clock size={24} />
+                      <span>PROCESSING</span>
                     </div>
                   )}
 
                   <div className="img-hover-actions">
                     <span className="expand-pill mono">
                       <Maximize2 size={13} />
-                      <span>INSPECT FULL RES</span>
+                      <span>INSPECT STILL</span>
                     </span>
                   </div>
 
-                  {item.enhancedUrl && (
-                    <span className="clahe-applied-badge mono" title="AI Enhanced CLAHE image ready">
-                      ENHANCED
-                    </span>
-                  )}
-
-                  {item.aiStatus === 'PROCESSING' && (
-                    <span 
-                      className="clahe-applied-badge mono" 
-                      style={{ background: 'rgba(250, 173, 20, 0.85)', color: '#000', borderColor: '#faad14' }}
-                      title="AI inference in progress"
-                    >
-                      AI PENDING
-                    </span>
-                  )}
-
-                  {item.boundingBoxes && item.boundingBoxes.length > 0 && (
-                    <span className="bbox-detected-badge mono">
-                      {item.boundingBoxes.length} TARGET
-                    </span>
-                  )}
+                  <div className="img-overlay-top">
+                    {isEnhanced ? (
+                      <span className="ai-status-pill complete mono">
+                        <CheckCircle2 size={11} />
+                        <span>AI ENHANCED</span>
+                      </span>
+                    ) : isProcessing ? (
+                      <span className="ai-status-pill processing mono">
+                        <Clock size={11} />
+                        <span>ENHANCING...</span>
+                      </span>
+                    ) : (
+                      <span className="ai-status-pill original mono">
+                        <span>ORIGINAL</span>
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                <div className="img-card-details">
-                  <div className="img-card-top-row">
-                    <span className="img-card-title">{item.title}</span>
-                    <span className="img-card-tag mono">{item.aiTag}</span>
-                  </div>
-
-                  <div className="img-card-meta-row mono">
-                    <span>{item.timestamp}</span>
-                    <span>
-                      {item.confidence != null ? (item.confidence <= 1 ? (item.confidence * 100).toFixed(1) + '%' : `${item.confidence}%`) : 'OPTICAL'}
-                    </span>
-                  </div>
-
-                  <div className="img-card-exp-row mono">
-                    <span>{item.resolution || '1280×720 (OV5647)'}</span>
-                    <span>{item.eventId ? item.eventId.slice(-12) : 'EDGE-NODE'}</span>
-                  </div>
+                <div className="img-meta-footer">
+                  <span className="img-event-id mono">{item.event_id || item.id}</span>
+                  <span className="img-time mono">
+                    {item.timestamp ? new Date(item.timestamp).toLocaleTimeString() : 'N/A'}
+                  </span>
                 </div>
               </div>
             );

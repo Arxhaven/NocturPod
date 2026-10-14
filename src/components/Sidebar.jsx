@@ -5,24 +5,19 @@ import {
   Activity, 
   Film, 
   Image as ImageIcon, 
-  Cpu, 
   HardDrive, 
-  Settings as SettingsIcon,
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
-import { formatHeartbeat } from '../utils/deviceStatus';
 import './Sidebar.css';
 
 const NAV_ITEMS = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
-  { id: 'live', label: 'Live Monitor', icon: Video, badge: 'LIVE' },
+  { id: 'live', label: 'Live Monitor', icon: Video, hasLiveBadge: true },
+  { id: 'images', label: 'Captures', icon: ImageIcon },
+  { id: 'footage', label: 'Recordings', icon: Film },
   { id: 'events', label: 'Events', icon: Activity },
-  { id: 'footage', label: 'Footage', icon: Film },
-  { id: 'images', label: 'Images', icon: ImageIcon },
-  { id: 'ai', label: 'AI Analysis', icon: Cpu },
   { id: 'device', label: 'Device', icon: HardDrive },
-  { id: 'settings', label: 'Settings', icon: SettingsIcon },
 ];
 
 export default function Sidebar({ 
@@ -33,26 +28,25 @@ export default function Sidebar({
   collapsed,
   onToggleCollapse, 
   setCollapsed,
-  deviceStatus, 
-  isDemoMode = false,
-  eventCount
+  deviceStatus,
+  backendOnline
 }) {
-  const isOnline = deviceStatus?.status === 'ONLINE';
-  const heartbeatText = formatHeartbeat(deviceStatus?.status, deviceStatus?.lastHeartbeatSec);
-  const isHeartbeatActive = isOnline && deviceStatus?.lastHeartbeatSec != null;
   const selectTab = onSelectTab || setActiveTab;
-  const collapsedState = Boolean(isCollapsed ?? collapsed);
-  const toggleCollapse = onToggleCollapse || (setCollapsed ? () => setCollapsed(!collapsedState) : undefined);
+  const isCollapsedState = Boolean(isCollapsed ?? collapsed);
+  const toggleCollapse = onToggleCollapse || (setCollapsed ? () => setCollapsed(!isCollapsedState) : undefined);
+
+  const isDeviceOnline = deviceStatus?.status === 'ONLINE' || deviceStatus?.status === 'RECORDING';
+  const isCameraOnline = deviceStatus?.camera_status === 'ONLINE';
 
   return (
-    <aside className={`sidebar-container ${collapsedState ? 'collapsed' : ''}`}>
+    <aside className={`sidebar-container ${isCollapsedState ? 'collapsed' : ''}`}>
       {/* Brand Header */}
       <div className="sidebar-brand">
         <div className="brand-logo-mark">
           <div className="lens-ring" />
           <div className="lens-core" />
         </div>
-        {!collapsedState && (
+        {!isCollapsedState && (
           <div className="brand-text">
             <span className="brand-name">NOCTUR<span className="brand-highlight">POD</span></span>
             <span className="brand-sub">EDGE SURVEILLANCE</span>
@@ -60,16 +54,22 @@ export default function Sidebar({
         )}
       </div>
 
-      {/* Heartbeat Status Indicator */}
+      {/* Heartbeat Status Indicator (Strictly Real State) */}
       <div className="sidebar-heartbeat">
         <div className="heartbeat-indicator">
-          {isHeartbeatActive && <span className="heartbeat-pulse" />}
-          <span className={`heartbeat-dot ${isHeartbeatActive ? '' : 'inactive'}`} />
+          <span className={`heartbeat-pulse ${isDeviceOnline ? 'online' : 'offline'}`} />
+          <span className={`heartbeat-dot ${isDeviceOnline ? 'online' : 'offline'}`} />
         </div>
-        {!collapsedState && (
+        {!isCollapsedState && (
           <div className="heartbeat-meta">
-            <span className="heartbeat-label">EDGE HEARTBEAT</span>
-            <span className="heartbeat-val mono">{heartbeatText}</span>
+            <span className="heartbeat-label">EDGE NODE</span>
+            <span className="heartbeat-val mono">
+              {!backendOnline 
+                ? 'BACKEND OFFLINE' 
+                : isDeviceOnline 
+                  ? 'ONLINE' 
+                  : 'OFFLINE'}
+            </span>
           </div>
         )}
       </div>
@@ -85,49 +85,40 @@ export default function Sidebar({
               key={item.id}
               className={`nav-item ${isActive ? 'active' : ''}`}
               onClick={() => selectTab && selectTab(item.id)}
-              title={collapsedState ? item.label : undefined}
+              title={isCollapsedState ? item.label : undefined}
             >
               <span className="nav-icon-wrap">
-                <Icon size={18} strokeWidth={isActive ? 2.2 : 1.7} />
+                <Icon size={18} />
               </span>
-              {!collapsedState && <span className="nav-label">{item.label}</span>}
-              {!collapsedState && item.badge && (
-                <span className="nav-badge mono">{item.badge}</span>
+              {!isCollapsedState && (
+                <>
+                  <span className="nav-label">{item.label}</span>
+                  {item.hasLiveBadge && (
+                    <span className={`nav-badge ${isCameraOnline ? 'badge-live' : 'badge-offline'}`}>
+                      {isCameraOnline ? 'LIVE' : 'OFFLINE'}
+                    </span>
+                  )}
+                </>
               )}
-              {isActive && <div className="active-indicator" />}
             </button>
           );
         })}
       </nav>
 
-      {/* Edge System Summary in footer */}
-      {!collapsedState && (
-        <div className="sidebar-footer">
-          <div className="edge-chip mono">
-            <div className="chip-row">
-              <span className="chip-label">NODE:</span>
-              <span className="chip-val">{isOnline ? 'RPI4-OV5647' : 'OFFLINE'}</span>
-            </div>
-            <div className="chip-row">
-              <span className="chip-label">MODE:</span>
-              <span className="chip-val" style={{ color: isDemoMode ? '#faad14' : (isOnline ? 'var(--status-online)' : 'var(--status-error)') }}>
-                {isDemoMode ? 'DEMO' : (isOnline ? 'LIVE' : 'OFFLINE')}
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Toggle button */}
+      {/* Bottom Collapse Toggle */}
       {toggleCollapse && (
-        <button 
-          type="button"
-          className="collapse-toggle-btn"
-          onClick={toggleCollapse}
-          aria-label={collapsedState ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          {collapsedState ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-        </button>
+        <div className="sidebar-footer">
+          <button
+            type="button"
+            className="collapse-toggle-btn"
+            onClick={toggleCollapse}
+            title={isCollapsedState ? "Expand Sidebar" : "Collapse Sidebar"}
+            aria-label={isCollapsedState ? "Expand Sidebar" : "Collapse Sidebar"}
+          >
+            {isCollapsedState ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+            {!isCollapsedState && <span className="collapse-text mono">COLLAPSE</span>}
+          </button>
+        </div>
       )}
     </aside>
   );

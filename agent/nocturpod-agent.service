@@ -1,0 +1,25 @@
+[Unit]
+Description=NocturPod Edge Surveillance Agent Service
+After=network-online.target time-sync.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/NocturPod
+ExecStart=/home/pi/NocturPod/.venv/bin/python -u agent/main.py
+Restart=always
+RestartSec=5s
+Environment=PYTHONUNBUFFERED=1
+Environment=NOCTURPOD_DEVICE_ID=nocturpod-edge-01
+Environment=NOCTURPOD_BACKEND_URL=https://your-nocturpod-backend.onrender.com
+Environment=NOCTURPOD_DEVICE_TOKEN=nocturpod-sec-key-replace-with-secure-token
+
+# Filesystem permissions
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/pi/nocturpod/media /home/pi/NocturPod/storage
+
+[Install]
+WantedBy=multi-user.target
