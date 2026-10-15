@@ -15,6 +15,7 @@ export default function DeviceScreen({ deviceStatus, onRefreshTelemetry }) {
   const isOnline = deviceStatus?.status === 'ONLINE' || deviceStatus?.status === 'RECORDING';
   const camStatus = deviceStatus?.camera_status || 'N/A';
   const wifiStatus = deviceStatus?.wifi_status || 'N/A';
+  const currentLightMode = deviceStatus?.light_mode || deviceStatus?.lightMode || 'WHITE';
 
   const formatUptime = (seconds) => {
     if (seconds == null || isNaN(seconds)) return 'N/A';
@@ -139,6 +140,16 @@ export default function DeviceScreen({ deviceStatus, onRefreshTelemetry }) {
             <div className="sub-row">
               <span className="s-label">PIPELINE:</span>
               <span className="s-val">Picamera2 / libcamera</span>
+            </div>
+            <div className="sub-row">
+              <span className="s-label">LIGHTING MODE:</span>
+              <span className={`s-val ${currentLightMode === 'NIGHT' ? 'night-active' : 'active'}`}>
+                {currentLightMode === 'NIGHT' ? 'MODE B: NIGHT (LOW-LIGHT)' : 'MODE A: WHITE (NORMAL)'}
+              </span>
+            </div>
+            <div className="sub-row">
+              <span className="s-label">GPIO DRIVER:</span>
+              <span className="s-val">BCM 18 [W] / BCM 23 [N]</span>
             </div>
           </div>
         </div>

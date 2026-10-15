@@ -145,10 +145,29 @@
   animation: pulse-border 1.5s infinite alternate;
 }
 
+.light-mode-btn.white-active {
+  background: linear-gradient(135deg, rgba(38, 70, 58, 0.9) 0%, rgba(20, 48, 40, 0.9) 100%);
+  border: 1px solid rgba(218, 241, 222, 0.4);
+  color: #f0fdf4;
+  box-shadow: 0 0 10px rgba(187, 247, 208, 0.15);
+}
+
+.light-mode-btn.night-active {
+  background: linear-gradient(135deg, rgba(30, 41, 69, 0.95) 0%, rgba(17, 24, 46, 0.95) 100%);
+  border: 1px solid rgba(147, 197, 253, 0.5);
+  color: #bfdbfe;
+  box-shadow: 0 0 12px rgba(96, 165, 250, 0.25);
+}
+
+.light-mode-btn:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
 @keyframes pulse-border {
   from { box-shadow: 0 0 4px rgba(255, 77, 79, 0.4); }
   to { box-shadow: 0 0 14px rgba(255, 77, 79, 0.8); }
 }
+
 
 @media (max-width: 1100px) {
   .backend-link-pill {

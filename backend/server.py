@@ -178,8 +178,46 @@ def device_heartbeat():
 
 
 # --------------------------------------------------------------------------
-# Command Queue Endpoints
+# Command Queue & Lighting Endpoints
 # --------------------------------------------------------------------------
+@app.get("/api/device/light/mode")
+def get_light_mode_endpoint():
+    check_device_timeouts()
+    device = get_device_status() or {}
+    return jsonify({
+        "success": True,
+        "mode": device.get("light_mode", "WHITE"),
+        "light_mode": device.get("light_mode", "WHITE"),
+        "device_id": device.get("device_id", "nocturpod-edge-01"),
+        "device_status": device.get("status", "OFFLINE"),
+        "confirmed": device.get("status") in ("ONLINE", "RECORDING")
+    })
+
+
+@app.post("/api/device/light/mode")
+def set_light_mode_endpoint():
+    data = request.get_json(silent=True) or {}
+    raw_mode = (data.get("mode") or "").strip().upper()
+    if raw_mode not in ("WHITE", "NIGHT"):
+        if raw_mode in ("NORMAL", "WHITE_LIGHT", "DAY"):
+            raw_mode = "WHITE"
+        elif raw_mode in ("LOW_LIGHT", "IR", "NIGHT_MODE", "DARK"):
+            raw_mode = "NIGHT"
+        else:
+            return jsonify({"success": False, "error": f"Invalid mode '{raw_mode}'. Must be WHITE or NIGHT."}), 400
+
+    cmd = queue_command("nocturpod-edge-01", "SET_LIGHT_MODE", {"mode": raw_mode})
+    log_system_event("INFO", "DASHBOARD", f"Lighting mode switch queued: {raw_mode}")
+    return jsonify({
+        "success": True,
+        "status": "QUEUED",
+        "mode": raw_mode,
+        "light_mode": raw_mode,
+        "command_id": cmd.get("command_id")
+    })
+
+
+
 @app.post("/api/device/commands/capture")
 def command_trigger_capture():
     cmd = queue_command("nocturpod-edge-01", "CAPTURE_IMAGE", {"timestamp": datetime.datetime.now().isoformat()})
@@ -214,6 +252,7 @@ def command_ack(command_id: str):
     error_msg = data.get("error_message")
     ack_command(command_id, status=status, error_message=error_msg)
     return jsonify({"status": "ACK", "command_id": command_id})
+
 
 
 # --------------------------------------------------------------------------
@@ -288,15 +327,19 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
                 update_event_status(event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED", notes=res.get("error"))
                 return
 
-            # Object detection on enhanced image
+            # Object detection on enhanced image (safely isolated)
             img_bgr = cv2.imread(str(enhanced_local_path))
             if img_bgr is not None:
-                det_res = ENGINE.infer(img_bgr)
-                for d in det_res.get("detections", []):
-                    record_detection(event_id, d["label"], d["confidence"], d["x1"], d["y1"], d["x2"], d["y2"])
+                try:
+                    det_res = ENGINE.infer(img_bgr)
+                    for d in det_res.get("detections", []):
+                        record_detection(event_id, d["label"], d["confidence"], d["x1"], d["y1"], d["x2"], d["y2"])
+                except Exception as det_err:
+                    print(f"[AI Detection] Notice: Vision detection non-fatal skip ({det_err})")
 
             # Upload enhanced image to Supabase Storage
             upload_to_supabase_storage(enhanced_local_path, enhanced_storage_path, content_type="image/jpeg")
+
 
             # Record ENHANCED media asset
             record_media_asset({

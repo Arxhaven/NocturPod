@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS devices (
     ai_model_version TEXT,
     stream_fps INTEGER DEFAULT 15,
     stream_resolution TEXT DEFAULT '1280x720',
+    light_mode TEXT NOT NULL DEFAULT 'WHITE', -- WHITE, NIGHT
     last_heartbeat TIMESTAMPTZ,
+
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

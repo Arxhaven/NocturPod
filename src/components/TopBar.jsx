@@ -5,7 +5,9 @@ import {
   Camera, 
   Clock, 
   Circle,
-  Server
+  Server,
+  Sun,
+  Moon
 } from 'lucide-react';
 import StatusBadge from './StatusBadge';
 import './TopBar.css';
@@ -19,7 +21,9 @@ export default function TopBar({
   isCapturing = false,
   activeTab = 'overview', 
   isRecording = false, 
-  onToggleRecording 
+  onToggleRecording,
+  onToggleLightMode,
+  isSwitchingLight = false
 }) {
   const [currentTime, setCurrentTime] = useState('');
 
@@ -37,6 +41,7 @@ export default function TopBar({
   const camStatus = deviceStatus?.camera_status || (deviceStatus?.cameraStatus ?? 'N/A');
   const wifiStatus = deviceStatus?.wifi_status || (deviceStatus?.wifiStatus ?? 'N/A');
   const isWifiConnected = wifiStatus === 'CONNECTED' || wifiStatus === 'ONLINE';
+  const currentLightMode = deviceStatus?.light_mode || deviceStatus?.lightMode || 'WHITE';
 
   const getPageTitle = (tab) => {
     switch (tab) {
@@ -101,6 +106,24 @@ export default function TopBar({
           status={isDeviceOnline ? (deviceStatus?.status || 'ONLINE') : 'OFFLINE'} 
           size="normal" 
         />
+
+        {/* Dual Light Mode Toggle (Mode A: White / Mode B: Night) */}
+        {onToggleLightMode && (
+          <button 
+            type="button"
+            className={`quick-trigger-btn light-mode-btn ${currentLightMode === 'NIGHT' ? 'night-active' : 'white-active'}`}
+            onClick={() => onToggleLightMode(currentLightMode === 'WHITE' ? 'NIGHT' : 'WHITE')}
+            title={!backendOnline ? "Backend unavailable" : (currentLightMode === 'WHITE' ? "Switch to Mode B: Night / Low-Light" : "Switch to Mode A: White / Normal Light")}
+            disabled={!backendOnline || isSwitchingLight}
+          >
+            {currentLightMode === 'NIGHT' ? <Moon size={14} /> : <Sun size={14} />}
+            <span>
+              {isSwitchingLight 
+                ? 'SWITCHING...' 
+                : (currentLightMode === 'NIGHT' ? 'MODE B: NIGHT' : 'MODE A: WHITE')}
+            </span>
+          </button>
+        )}
 
         {/* Quick action: Capture */}
         {onQuickCapture && (

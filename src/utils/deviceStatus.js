@@ -31,6 +31,7 @@ export const INITIAL_DISCONNECTED_STATUS = {
   streamResolution: '1280x720',
   claheEnabled: true,
   irNightMode: 'UNKNOWN',
+  lightMode: 'WHITE', // 'WHITE' (Normal) or 'NIGHT' (Low-Light)
   telemetryVerified: false,
 };
 
@@ -105,6 +106,7 @@ export function evaluateDeviceStatus(healthResult, telemetryData, currentStatus 
       ramUsagePercent: telemetryData.ram_usage_percent ?? telemetryData.ramUsagePercent ?? null,
       streamFps: telemetryData.stream_fps ?? telemetryData.streamFps ?? null,
       streamResolution: telemetryData.stream_resolution || telemetryData.streamResolution || '1280x720',
+      lightMode: telemetryData.light_mode || telemetryData.lightMode || currentStatus.lightMode || 'WHITE',
       uptimeHours,
       uptimeMinutes,
       lastHeartbeatSec: calculatedHeartbeatSec ?? telemetryData.lastHeartbeatSec ?? null,
@@ -113,6 +115,7 @@ export function evaluateDeviceStatus(healthResult, telemetryData, currentStatus 
       telemetryVerified: true,
     };
   }
+
 
   // Backend HTTP responded, but no specific device record returned
   return {

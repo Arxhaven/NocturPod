@@ -149,7 +149,7 @@ export async function fetchEvents(filter = 'ALL', search = '') {
     const query = params.toString() ? `?${params.toString()}` : '';
     const res = await fetchWithTimeout(buildApiUrl(`/api/events${query}`), {
       headers: getAuthHeaders(),
-    }, 8000);
+    }, 20000);
     if (res.ok) {
       const data = await res.json();
       return Array.isArray(data) ? data : (data.events || []);
@@ -167,7 +167,7 @@ export async function fetchImages() {
   try {
     const res = await fetchWithTimeout(buildApiUrl('/api/media/images'), {
       headers: getAuthHeaders(),
-    }, 8000);
+    }, 20000);
     if (res.ok) {
       const data = await res.json();
       return Array.isArray(data) ? data : (data.images || []);
@@ -185,7 +185,7 @@ export async function fetchFootage() {
   try {
     const res = await fetchWithTimeout(buildApiUrl('/api/media/footage'), {
       headers: getAuthHeaders(),
-    }, 8000);
+    }, 20000);
     if (res.ok) {
       const data = await res.json();
       return Array.isArray(data) ? data : (data.footage || []);
@@ -195,6 +195,41 @@ export async function fetchFootage() {
   }
   return [];
 }
+
+/**
+ * Fetches the current hardware lighting mode from backend (Mode A: WHITE, Mode B: NIGHT).
+ */
+export async function fetchLightMode() {
+  try {
+    const res = await fetchWithTimeout(buildApiUrl('/api/device/light/mode'), {
+      headers: getAuthHeaders(),
+    }, 6000);
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (err) {
+    console.warn("Failed to fetch light mode:", err.message);
+  }
+  return null;
+}
+
+/**
+ * Dispatches a dual light mode command to edge Raspberry Pi node (Mode A: WHITE, Mode B: NIGHT).
+ */
+export async function setLightMode(mode) {
+  const normalized = (mode || '').toUpperCase();
+  const res = await fetchWithTimeout(buildApiUrl('/api/device/light/mode'), {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ mode: normalized }),
+  }, 10000);
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Light mode error (${res.status}): ${errText || res.statusText}`);
+  }
+  return await res.json();
+}
+
 
 /**
  * Fetches AI enhancement pipeline and vision model status.
@@ -306,6 +341,7 @@ export async function deleteAllEvents() {
   return await res.json();
 }
 
+
 /**
  * Edge configuration helpers.
  */
@@ -324,3 +360,4 @@ export async function detectObjects() {
 export async function detectImageAnnotated() {
   return null;
 }
+

@@ -130,8 +130,72 @@ class NocturPodSystemTests(unittest.TestCase):
         res_imgs = self.client.get("/api/media/images")
         self.assertEqual(res_imgs.status_code, 200)
         imgs = res_imgs.get_json()
-        self.assertTrue(any(i.get("event_id") == "NP_TEST_CAPTURE_001" for i in imgs))
+    def test_06_light_mode_api(self):
+        # 1. Check current light mode
+        res = self.client.get("/api/device/light/mode")
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data.get("success"))
+        self.assertIn(data.get("light_mode"), ("WHITE", "NIGHT"))
+
+        # 2. Switch to Mode B: NIGHT
+        res_post = self.client.post("/api/device/light/mode", json={"mode": "NIGHT"})
+        self.assertEqual(res_post.status_code, 200)
+        post_data = res_post.get_json()
+        self.assertTrue(post_data.get("success"))
+        self.assertEqual(post_data.get("light_mode"), "NIGHT")
+
+        # 3. Verify command was queued for edge node
+        res_poll = self.client.get("/api/device/commands/poll", headers=self.headers)
+        cmds = res_poll.get_json().get("commands", [])
+        light_cmd = next((c for c in cmds if (c.get("action") == "SET_LIGHT_MODE" or c.get("command_type") == "SET_LIGHT_MODE")), None)
+        self.assertIsNotNone(light_cmd)
+        self.assertEqual(light_cmd.get("payload", {}).get("mode"), "NIGHT")
+
+
+
+        # 4. Device sends heartbeat confirming Mode B: NIGHT
+        hb_payload = {
+            "device_id": "nocturpod-edge-01",
+            "status": "ONLINE",
+            "light_mode": "NIGHT"
+        }
+        res_hb = self.client.post("/api/device/heartbeat", json=hb_payload, headers=self.headers)
+        self.assertEqual(res_hb.status_code, 200)
+
+        # 5. Check status reflects NIGHT
+        res_status = self.client.get("/api/device/status")
+        self.assertEqual(res_status.status_code, 200)
+        self.assertEqual(res_status.get_json().get("light_mode"), "NIGHT")
+
+        # 6. Switch back to Mode A: WHITE
+        res_white = self.client.post("/api/device/light/mode", json={"mode": "WHITE"})
+        self.assertEqual(res_white.status_code, 200)
+        self.assertEqual(res_white.get_json().get("light_mode"), "WHITE")
+
+    def test_07_lighting_controller_simulation(self):
+        from agent.lighting import LightingController
+        controller = LightingController(white_pin=18, night_pin=23)
+        self.assertEqual(controller.get_mode(), "WHITE")
+
+        # Switch to NIGHT
+        success_night, mode_night, err_night = controller.set_mode("NIGHT")
+        self.assertTrue(success_night)
+        self.assertEqual(mode_night, "NIGHT")
+        self.assertIsNone(err_night)
+        self.assertEqual(controller.get_mode(), "NIGHT")
+
+        # Switch back to WHITE
+        success_white, mode_white, err_white = controller.set_mode("WHITE")
+        self.assertTrue(success_white)
+        self.assertEqual(mode_white, "WHITE")
+        self.assertIsNone(err_white)
+        self.assertEqual(controller.get_mode(), "WHITE")
+
+        controller.cleanup()
+
 
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -28,6 +28,7 @@ from agent.config import (
     STREAM_FRAME_INTERVAL,
 )
 from agent.heartbeat import collect_device_telemetry
+from agent.lighting import LightingController
 from agent.stream import StreamManager
 from agent.uploader import SpoolUploader
 
@@ -41,6 +42,7 @@ class NocturPodAgent:
         print(f"[NocturPod Agent] Starting edge node '{DEVICE_ID}' targeting backend: {self.backend_url}")
 
         self.camera = OV5647Camera()
+        self.lighting = LightingController()
         self.api_client = NocturPodApiClient(self.backend_url, self.token)
         self.spool = SpoolUploader(self.api_client)
         self.capture_ctrl = CaptureController(self.camera, self.api_client, self.spool)
@@ -52,7 +54,8 @@ class NocturPodAgent:
             try:
                 telemetry = collect_device_telemetry(
                     camera_online=self.camera.is_opened,
-                    is_recording=self.record_ctrl.is_recording
+                    is_recording=self.record_ctrl.is_recording,
+                    light_mode=self.lighting.get_mode()
                 )
                 self.api_client.send_heartbeat(telemetry)
                 # Also process any pending offline spooled uploads
@@ -97,6 +100,16 @@ class NocturPodAgent:
             else:
                 self.api_client.ack_command(cmd_id, "FAILED", error_message=error)
 
+        elif action == "SET_LIGHT_MODE":
+            payload = cmd.get("payload") or {}
+            mode = payload.get("mode", "WHITE")
+            ok, confirmed_mode, error = self.lighting.set_mode(mode)
+            if ok:
+                self.api_client.ack_command(cmd_id, "EXECUTED")
+                print(f"[Lighting] Successfully confirmed light mode: {confirmed_mode}")
+            else:
+                self.api_client.ack_command(cmd_id, "FAILED", error_message=error)
+
         else:
             self.api_client.ack_command(cmd_id, "UNKNOWN_ACTION", error_message=f"Action {action} unrecognized")
 
@@ -121,7 +134,9 @@ class NocturPodAgent:
             print("\n[NocturPod Agent] Interrupted. Shutting down gracefully...")
         finally:
             self.is_running = False
+            self.lighting.close()
             self.camera.release()
+
 
 
 def main() -> None:

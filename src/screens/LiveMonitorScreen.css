@@ -94,11 +94,96 @@
   font-weight: 700;
 }
 
+.t-val.night-active {
+  color: #93c5fd;
+  font-weight: 600;
+}
+
+.light-mode-control-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(5, 31, 32, 0.4);
+  border: 1px solid rgba(142, 182, 155, 0.15);
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.light-mode-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+}
+
+.light-mode-label {
+  color: var(--color-muted-sage);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.light-mode-chip {
+  color: var(--color-light-green);
+  background: rgba(11, 43, 38, 0.6);
+  border: 1px solid rgba(142, 182, 155, 0.2);
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 9px;
+}
+
+.light-mode-btn-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.light-mode-switch-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  background: rgba(11, 43, 38, 0.4);
+  border: 1px solid rgba(142, 182, 155, 0.2);
+  color: var(--color-muted-sage);
+  transition: all var(--transition-fast);
+}
+
+.light-mode-switch-btn:hover:not(:disabled) {
+  background: rgba(22, 56, 50, 0.8);
+  border-color: var(--color-light-green);
+  color: var(--color-light-green);
+}
+
+.light-mode-switch-btn.active-white {
+  background: linear-gradient(135deg, rgba(38, 70, 58, 0.9) 0%, rgba(20, 48, 40, 0.9) 100%);
+  border-color: rgba(218, 241, 222, 0.5);
+  color: #f0fdf4;
+  box-shadow: 0 0 10px rgba(187, 247, 208, 0.15);
+}
+
+.light-mode-switch-btn.active-night {
+  background: linear-gradient(135deg, rgba(30, 41, 69, 0.95) 0%, rgba(17, 24, 46, 0.95) 100%);
+  border-color: rgba(147, 197, 253, 0.6);
+  color: #bfdbfe;
+  box-shadow: 0 0 12px rgba(96, 165, 250, 0.25);
+}
+
+.light-mode-switch-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .panel-quick-actions {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
+
 
 .btn-full-action {
   display: flex;

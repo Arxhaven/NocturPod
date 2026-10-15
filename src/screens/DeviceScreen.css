@@ -122,6 +122,12 @@
   color: #52c41a;
 }
 
+.s-val.night-active {
+  color: #93c5fd;
+  font-weight: 600;
+}
+
+
 /* Static Hardware Specifications Section */
 .specs-section {
   padding: 18px 20px;

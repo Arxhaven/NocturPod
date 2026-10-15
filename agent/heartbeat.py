@@ -76,7 +76,7 @@ def get_wifi_telemetry() -> tuple[str, str | None, int | None]:
     return ("DISCONNECTED", None, None)
 
 
-def collect_device_telemetry(camera_online: bool, is_recording: bool) -> dict[str, Any]:
+def collect_device_telemetry(camera_online: bool, is_recording: bool, light_mode: str = "WHITE") -> dict[str, Any]:
     """Collects real hardware metrics from Raspberry Pi 4."""
     try:
         disk = shutil.disk_usage("/")
@@ -107,5 +107,7 @@ def collect_device_telemetry(camera_online: bool, is_recording: bool) -> dict[st
         "software_version": "1.0.0",
         "ai_model_version": "Adaptive CLAHE + YOLOv8n",
         "stream_fps": STREAM_FPS,
-        "stream_resolution": f"{STREAM_WIDTH}x{STREAM_HEIGHT}"
+        "stream_resolution": f"{STREAM_WIDTH}x{STREAM_HEIGHT}",
+        "light_mode": light_mode
     }
+

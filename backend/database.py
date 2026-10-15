@@ -25,6 +25,8 @@ LOCAL_DB_PATH = Path("storage") / "nocturpod_local.db"
 _LOCK = threading.RLock()
 _EVENT_COUNTER = 0
 _LAST_SECOND = ""
+_SIGNED_URL_CACHE: dict[str, tuple[str, float]] = {}  # storage_path -> (signed_url, expire_epoch)
+
 
 
 def has_supabase_config() -> bool:
@@ -73,11 +75,21 @@ def _supabase_request(endpoint: str, method: str = "GET", data: dict | list | No
         return None
 
 
-def get_signed_storage_url(storage_path: str, expires_in: int = 7200) -> str:
-    """Generates a secure signed URL from Supabase Storage for private media assets."""
+def get_signed_storage_url(storage_path: str, expires_in: int = 7200) -> str | None:
+    """Generates a secure signed URL from Supabase Storage for private media assets with in-memory caching."""
+    if not storage_path:
+        return None
+
     if not has_supabase_config():
         # Fallback to backend media route if not configured
         return f"/api/media/file/{storage_path}"
+
+    now_ts = time.time()
+    cached = _SIGNED_URL_CACHE.get(storage_path)
+    if cached:
+        url, exp = cached
+        if now_ts < (exp - 300):  # Valid with 5-minute safety threshold
+            return url
 
     url = f"{SUPABASE_URL}/storage/v1/object/sign/{SUPABASE_STORAGE_BUCKET}/{storage_path.lstrip('/')}"
     req_headers = {
@@ -92,10 +104,13 @@ def get_signed_storage_url(storage_path: str, expires_in: int = 7200) -> str:
             res = json.loads(resp.read().decode("utf-8"))
             signed_path = res.get("signedURL")
             if signed_path:
-                return f"{SUPABASE_URL}/storage/v1{signed_path}"
+                full_url = f"{SUPABASE_URL}/storage/v1{signed_path}"
+                _SIGNED_URL_CACHE[storage_path] = (full_url, now_ts + expires_in)
+                return full_url
     except Exception as e:
         print(f"[Supabase Storage] Signed URL generation failed for {storage_path}: {e}")
     return f"/api/media/file/{storage_path}"
+
 
 
 def upload_to_supabase_storage(local_path: Path | str, storage_path: str, content_type: str = "image/jpeg") -> bool:
@@ -181,6 +196,7 @@ def init_db() -> None:
             ai_model_version TEXT,
             stream_fps INTEGER DEFAULT 15,
             stream_resolution TEXT DEFAULT '1280x720',
+            light_mode TEXT NOT NULL DEFAULT 'WHITE',
             last_heartbeat TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -242,6 +258,11 @@ def init_db() -> None:
             message TEXT NOT NULL
         );
         """)
+        # Safe migration for existing SQLite database file if light_mode column missing
+        try:
+            conn.execute("ALTER TABLE devices ADD COLUMN light_mode TEXT NOT NULL DEFAULT 'WHITE'")
+        except Exception:
+            pass
         conn.commit()
 
 
@@ -272,6 +293,7 @@ def upsert_device_heartbeat(data: dict[str, Any]) -> dict[str, Any]:
         "ai_model_version": data.get("ai_model_version", "Adaptive CLAHE + YOLOv8n"),
         "stream_fps": data.get("stream_fps", 15),
         "stream_resolution": data.get("stream_resolution", "1280x720"),
+        "light_mode": data.get("light_mode", "WHITE"),
         "last_heartbeat": now_iso,
         "updated_at": now_iso
     }
@@ -289,8 +311,8 @@ def upsert_device_heartbeat(data: dict[str, Any]) -> dict[str, Any]:
             ip_address, storage_used_gb, storage_total_gb,
             cpu_temp_c, cpu_usage_percent, ram_usage_percent,
             uptime_seconds, software_version, ai_model_version,
-            stream_fps, stream_resolution, last_heartbeat, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            stream_fps, stream_resolution, light_mode, last_heartbeat, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(device_id) DO UPDATE SET
             status = excluded.status,
             camera_status = excluded.camera_status,
@@ -304,6 +326,7 @@ def upsert_device_heartbeat(data: dict[str, Any]) -> dict[str, Any]:
             cpu_usage_percent = excluded.cpu_usage_percent,
             ram_usage_percent = excluded.ram_usage_percent,
             uptime_seconds = excluded.uptime_seconds,
+            light_mode = excluded.light_mode,
             last_heartbeat = excluded.last_heartbeat,
             updated_at = excluded.updated_at
         """, (
@@ -312,7 +335,7 @@ def upsert_device_heartbeat(data: dict[str, Any]) -> dict[str, Any]:
             record["wifi_rssi"], record["ip_address"], record["storage_used_gb"], record["storage_total_gb"],
             record["cpu_temp_c"], record["cpu_usage_percent"], record["ram_usage_percent"],
             record["uptime_seconds"], record["software_version"], record["ai_model_version"],
-            record["stream_fps"], record["stream_resolution"], now_iso, now_iso
+            record["stream_fps"], record["stream_resolution"], record["light_mode"], now_iso, now_iso
         ))
         conn.commit()
     return record
@@ -324,6 +347,7 @@ def get_device_status(device_id: str = "nocturpod-edge-01") -> dict[str, Any] | 
         res = _supabase_request(f"devices?device_id=eq.{device_id}")
         if res and len(res) > 0:
             dev = res[0]
+            dev["light_mode"] = dev.get("light_mode") or "WHITE"
             # Check 15-second heartbeat timeout
             last_hb = dev.get("last_heartbeat")
             if last_hb:
@@ -341,6 +365,7 @@ def get_device_status(device_id: str = "nocturpod-edge-01") -> dict[str, Any] | 
         if not row:
             return None
         dev = dict(row)
+        dev["light_mode"] = dev.get("light_mode") or "WHITE"
         last_hb = dev.get("last_heartbeat")
         if last_hb:
             try:
@@ -351,6 +376,7 @@ def get_device_status(device_id: str = "nocturpod-edge-01") -> dict[str, Any] | 
             except Exception:
                 pass
         return dev
+
 
 
 def check_device_timeouts(timeout_seconds: int = 15) -> None:
@@ -528,6 +554,7 @@ def get_event(event_id: str) -> dict[str, Any] | None:
 
 
 def list_events(limit: int = 50, filter_type: str | None = None, search: str | None = None) -> list[dict[str, Any]]:
+    """Retrieves events in batch with high performance, pre-warming signed URLs and reconciling orphaned records."""
     if has_supabase_config():
         query = f"events?select=*&order=timestamp.desc&limit={limit}"
         if filter_type and filter_type != "ALL":
@@ -535,10 +562,93 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
         if search and search.strip():
             query += f"&or=(event_id.ilike.*{search.strip()}*,notes.ilike.*{search.strip()}*)"
         evs = _supabase_request(query) or []
-        return [get_event(e["event_id"]) for e in evs if e.get("event_id")]
+        if not evs:
+            return []
+
+        event_ids = [e["event_id"] for e in evs if e.get("event_id")]
+        if not event_ids:
+            return []
+
+        # Batch fetch all media_assets and detections in parallel or 2 fast requests
+        ids_query = ",".join(event_ids)
+        all_assets = _supabase_request(f"media_assets?event_id=in.({ids_query})") or []
+        all_detections = _supabase_request(f"detections?event_id=in.({ids_query})") or []
+
+        assets_by_event: dict[str, list[dict[str, Any]]] = {}
+        for a in all_assets:
+            assets_by_event.setdefault(a["event_id"], []).append(a)
+
+        detections_by_event: dict[str, list[dict[str, Any]]] = {}
+        for d in all_detections:
+            detections_by_event.setdefault(d["event_id"], []).append(d)
+
+        # Pre-warm signed storage URLs concurrently for any uncached paths
+        uncached_paths = set()
+        for a in all_assets:
+            sp = a.get("storage_path")
+            if sp and sp not in _SIGNED_URL_CACHE:
+                uncached_paths.add(sp)
+
+        if uncached_paths:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(uncached_paths))) as pool:
+                list(pool.map(get_signed_storage_url, uncached_paths))
+
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        orphaned_to_fix = []
+        results = []
+
+        for ev in evs:
+            eid = ev.get("event_id")
+            if not eid:
+                continue
+
+            assets = assets_by_event.get(eid, [])
+            detections = detections_by_event.get(eid, [])
+
+            orig = next((a for a in assets if a.get("variant") == "ORIGINAL"), None)
+            enh = next((a for a in assets if a.get("variant") == "ENHANCED"), None)
+
+            ev["original_url"] = get_signed_storage_url(orig["storage_path"]) if orig else None
+            ev["enhanced_url"] = get_signed_storage_url(enh["storage_path"]) if enh else None
+            ev["media_type"] = "VIDEO" if ev.get("type") == "VIDEO_RECORDING" else "IMAGE"
+            ev["detections"] = detections
+
+            # Orphan reconciliation: if an event is stuck in ENHANCEMENT_PROCESSING or PENDING
+            # but has a genuine original asset, reconcile to COMPLETE so the frontend displays it immediately
+            status = ev.get("status", "")
+            if status == "ENHANCEMENT_PROCESSING" or (status == "CAPTURE_REQUESTED" and orig):
+                ev["status"] = "COMPLETE" if (enh or orig) else "FAILED"
+                ev["ai_status"] = "COMPLETE" if enh else "ORIGINAL_PRESERVED"
+                ev["processing_status"] = "COMPLETE" if (enh or orig) else "FAILED"
+                orphaned_to_fix.append(eid)
+            else:
+                if enh:
+                    ev["processing_status"] = enh.get("processing_status", "COMPLETE")
+                elif orig:
+                    ev["processing_status"] = "COMPLETE" if status in ("COMPLETE", "CAPTURED", "RECORDED") else "PENDING"
+                else:
+                    ev["processing_status"] = "NONE"
+
+            results.append(ev)
+
+        # Asynchronously reconcile orphaned events in Supabase
+        if orphaned_to_fix:
+            def _patch_orphans():
+                for oid in orphaned_to_fix:
+                    try:
+                        _supabase_request(f"events?event_id=eq.{oid}", method="PATCH", data={
+                            "status": "COMPLETE",
+                            "ai_status": "ORIGINAL_PRESERVED"
+                        })
+                    except Exception:
+                        pass
+            threading.Thread(target=_patch_orphans, daemon=True).start()
+
+        return results
 
     with _LOCK, _get_local_connection() as conn:
-        q = "SELECT event_id FROM events"
+        q = "SELECT * FROM events"
         params: list[Any] = []
         conds = []
         if filter_type and filter_type != "ALL":
@@ -554,7 +664,56 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
         params.append(limit)
 
         rows = conn.execute(q, tuple(params)).fetchall()
-        return [get_event(r["event_id"]) for r in rows if r["event_id"]]
+        if not rows:
+            return []
+
+        ev_list = [dict(r) for r in rows]
+        eids = [e["event_id"] for e in ev_list]
+        placeholders = ",".join("?" for _ in eids)
+
+        asset_rows = conn.execute(f"SELECT * FROM media_assets WHERE event_id IN ({placeholders})", tuple(eids)).fetchall()
+        det_rows = conn.execute(f"SELECT * FROM detections WHERE event_id IN ({placeholders})", tuple(eids)).fetchall()
+
+        assets_by_event = {}
+        for a in asset_rows:
+            ad = dict(a)
+            assets_by_event.setdefault(ad["event_id"], []).append(ad)
+
+        detections_by_event = {}
+        for d in det_rows:
+            dd = dict(d)
+            detections_by_event.setdefault(dd["event_id"], []).append(dd)
+
+        results = []
+        for ev in ev_list:
+            eid = ev["event_id"]
+            assets = assets_by_event.get(eid, [])
+            detections = detections_by_event.get(eid, [])
+
+            orig = next((a for a in assets if a.get("variant") == "ORIGINAL"), None)
+            enh = next((a for a in assets if a.get("variant") == "ENHANCED"), None)
+
+            ev["original_url"] = get_signed_storage_url(orig["storage_path"]) if orig else None
+            ev["enhanced_url"] = get_signed_storage_url(enh["storage_path"]) if enh else None
+            ev["media_type"] = "VIDEO" if ev.get("type") == "VIDEO_RECORDING" else "IMAGE"
+            ev["detections"] = detections
+
+            status = ev.get("status", "")
+            if status == "ENHANCEMENT_PROCESSING" or (status == "CAPTURE_REQUESTED" and orig):
+                ev["status"] = "COMPLETE" if (enh or orig) else "FAILED"
+                ev["ai_status"] = "COMPLETE" if enh else "ORIGINAL_PRESERVED"
+                ev["processing_status"] = "COMPLETE" if (enh or orig) else "FAILED"
+            else:
+                if enh:
+                    ev["processing_status"] = enh.get("processing_status", "COMPLETE")
+                elif orig:
+                    ev["processing_status"] = "COMPLETE" if status in ("COMPLETE", "CAPTURED", "RECORDED") else "PENDING"
+                else:
+                    ev["processing_status"] = "NONE"
+
+            results.append(ev)
+        return results
+
 
 
 def list_media_events(media_type: str = "IMAGE") -> list[dict[str, Any]]:

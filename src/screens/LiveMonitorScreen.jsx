@@ -1,19 +1,22 @@
 import React from 'react';
 import LivePlayer from '../components/LivePlayer';
 import StatusBadge from '../components/StatusBadge';
-import { Camera, Circle } from 'lucide-react';
+import { Camera, Circle, Sun, Moon } from 'lucide-react';
 import './LiveMonitorScreen.css';
 
 export default function LiveMonitorScreen({ 
   deviceStatus, 
   onSnapshot, 
   isRecording, 
-  onToggleRecording 
+  onToggleRecording,
+  onToggleLightMode,
+  isSwitchingLight = false
 }) {
   const isOnline = deviceStatus?.status === 'ONLINE' || deviceStatus?.status === 'RECORDING';
   const camStatus = deviceStatus?.camera_status || 'N/A';
   const resolution = deviceStatus?.stream_resolution || 'N/A';
   const fps = isOnline && deviceStatus?.stream_fps != null ? `${deviceStatus.stream_fps} FPS` : 'N/A';
+  const currentLightMode = deviceStatus?.light_mode || deviceStatus?.lightMode || 'WHITE';
 
   return (
     <div className="live-monitor-container">
@@ -70,6 +73,12 @@ export default function LiveMonitorScreen({
                   {isRecording ? 'RECORDING' : 'IDLE'}
                 </span>
               </div>
+              <div className="t-row">
+                <span>LIGHTING MODE:</span>
+                <span className={`t-val ${currentLightMode === 'NIGHT' ? 'night-active' : 'active'}`}>
+                  {currentLightMode === 'NIGHT' ? 'MODE B: NIGHT' : 'MODE A: WHITE'}
+                </span>
+              </div>
             </div>
           </div>
 
@@ -77,6 +86,39 @@ export default function LiveMonitorScreen({
             <div className="panel-head">
               <span className="panel-title">EDGE COMMANDS</span>
             </div>
+
+            {/* Dual Light Mode Selector */}
+            <div className="light-mode-control-block">
+              <div className="light-mode-header mono">
+                <span className="light-mode-label">ILLUMINATION MODE</span>
+                <span className="light-mode-chip">
+                  {currentLightMode === 'NIGHT' ? 'BCM 23 [IR/NIGHT]' : 'BCM 18 [WHITE]'}
+                </span>
+              </div>
+              <div className="light-mode-btn-group">
+                <button
+                  type="button"
+                  className={`light-mode-switch-btn mono ${currentLightMode === 'WHITE' ? 'active-white' : ''}`}
+                  onClick={() => onToggleLightMode && onToggleLightMode('WHITE')}
+                  disabled={isSwitchingLight || !isOnline}
+                  title="Activate Mode A: White / Normal Light (BCM 18)"
+                >
+                  <Sun size={14} />
+                  <span>MODE A: WHITE</span>
+                </button>
+                <button
+                  type="button"
+                  className={`light-mode-switch-btn mono ${currentLightMode === 'NIGHT' ? 'active-night' : ''}`}
+                  onClick={() => onToggleLightMode && onToggleLightMode('NIGHT')}
+                  disabled={isSwitchingLight || !isOnline}
+                  title="Activate Mode B: Night / Low-Light Mode (BCM 23)"
+                >
+                  <Moon size={14} />
+                  <span>MODE B: NIGHT</span>
+                </button>
+              </div>
+            </div>
+
             <div className="panel-quick-actions">
               <button 
                 type="button"

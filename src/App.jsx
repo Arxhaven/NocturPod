@@ -22,7 +22,8 @@ import {
   fetchFootage, 
   triggerSnapshot, 
   toggleRecording,
-  deleteEvent
+  deleteEvent,
+  setLightMode
 } from './services/api';
 import './App.css';
 
@@ -40,6 +41,7 @@ export default function App() {
   const [selectedVideo, setSelectedVideo] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [isSwitchingLight, setIsSwitchingLight] = useState(false);
   const [toastNotification, setToastNotification] = useState(null);
   const isPollingRef = useRef(false);
 
@@ -187,6 +189,42 @@ export default function App() {
     }
   };
 
+  // Genuine Dual Light Mode toggle flow (Mode A: White / Mode B: Night)
+  const handleToggleLightMode = async (targetMode) => {
+    if (!backendOnline) {
+      showToast('BACKEND UNAVAILABLE — Cannot dispatch light mode command', true);
+      return;
+    }
+
+    const previousMode = deviceStatus?.light_mode || deviceStatus?.lightMode || 'WHITE';
+    if (targetMode === previousMode) return;
+
+    try {
+      setIsSwitchingLight(true);
+      showToast(`DISPATCHING LIGHT MODE: ${targetMode === 'NIGHT' ? 'MODE B (NIGHT / LOW-LIGHT)' : 'MODE A (WHITE / NORMAL)'}...`);
+      
+      // Optimistic UI update
+      setDeviceStatus(prev => ({
+        ...prev,
+        light_mode: targetMode,
+        lightMode: targetMode,
+      }));
+
+      await setLightMode(targetMode);
+      showToast(`LIGHT MODE CONFIRMED: ${targetMode === 'NIGHT' ? 'MODE B (NIGHT / LOW-LIGHT)' : 'MODE A (WHITE / NORMAL)'}`);
+    } catch (err) {
+      // Revert optimistic update on failure
+      setDeviceStatus(prev => ({
+        ...prev,
+        light_mode: previousMode,
+        lightMode: previousMode,
+      }));
+      showToast(`Light Mode Error: ${err.message}`, true);
+    } finally {
+      setIsSwitchingLight(false);
+    }
+  };
+
   // Delete event and associated media
   const handleDeleteEvent = async (eventId) => {
     try {
@@ -227,6 +265,8 @@ export default function App() {
           activeTab={activeTab}
           isRecording={isRecording}
           onToggleRecording={handleToggleRecording}
+          onToggleLightMode={handleToggleLightMode}
+          isSwitchingLight={isSwitchingLight}
         />
 
         {/* Global Toast Notification */}
@@ -257,6 +297,8 @@ export default function App() {
               onSnapshot={handleQuickCapture}
               isRecording={isRecording}
               onToggleRecording={handleToggleRecording}
+              onToggleLightMode={handleToggleLightMode}
+              isSwitchingLight={isSwitchingLight}
             />
           )}
 
