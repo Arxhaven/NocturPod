@@ -157,7 +157,7 @@ export async function fetchEvents(filter = 'ALL', search = '') {
   } catch (err) {
     console.warn("Failed to fetch events:", err.message);
   }
-  return [];
+  return null;
 }
 
 /**
@@ -175,7 +175,7 @@ export async function fetchImages() {
   } catch (err) {
     console.warn("Failed to fetch images:", err.message);
   }
-  return [];
+  return null;
 }
 
 /**
@@ -193,7 +193,7 @@ export async function fetchFootage() {
   } catch (err) {
     console.warn("Failed to fetch recordings:", err.message);
   }
-  return [];
+  return null;
 }
 
 /**
