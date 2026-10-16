@@ -59,9 +59,11 @@ export default function App() {
         fetchImages(),
         fetchFootage()
       ]);
-      if (evts) setEvents(evts);
-      if (imgs) setImages(imgs);
-      if (foot) setFootage(foot);
+      // A null result means the request failed; preserve the last known media instead of
+      // making the gallery appear empty during a transient backend/network error.
+      if (Array.isArray(evts)) setEvents(evts);
+      if (Array.isArray(imgs)) setImages(imgs);
+      if (Array.isArray(foot)) setFootage(foot);
     } catch (err) {
       console.warn("Media sync notice:", err);
     }

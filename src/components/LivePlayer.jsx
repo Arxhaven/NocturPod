@@ -61,6 +61,18 @@ export default function LivePlayer({
     };
   }, [streamState]);
 
+  // Automatically retry the MJPEG endpoint after temporary backend/device outages.
+  // The backend can return HTTP 503 while the Pi is waking or reconnecting; without
+  // this retry the player stayed offline until the user clicked reconnect.
+  useEffect(() => {
+    if (streamState !== 'OFFLINE') return undefined;
+    const retryTimer = setTimeout(() => {
+      setStreamState('CONNECTING');
+      setStreamKey(Date.now());
+    }, 5000);
+    return () => clearTimeout(retryTimer);
+  }, [streamState, streamKey]);
+
   const handleFullscreenToggle = () => {
     if (!containerRef.current) return;
     if (!document.fullscreenElement) {
