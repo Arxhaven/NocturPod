@@ -2,9 +2,15 @@
 flask>=3.0.0
 flask-cors>=4.0.0
 gunicorn>=21.2.0
-opencv-python-headless>=4.9.0
+
+# OpenCV 4.13.0.90 headless has a Linux libxcb.so.1 dependency regression.
+# Keep the cloud runtime on the known-good 4.12 wheel until this is resolved.
+opencv-python-headless>=4.9.0,<4.13
+
 numpy>=1.26.0
 psutil>=5.9.0
 requests>=2.31.0
 PyYAML>=6.0
-ultralytics>=8.3.0
+
+# Ultralytics headless distribution avoids pulling the GUI-enabled opencv-python wheel.
+ultralytics-opencv-headless>=8.3.0
