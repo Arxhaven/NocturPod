@@ -359,7 +359,18 @@ def upsert_device_heartbeat(data: dict[str, Any]) -> dict[str, Any]:
     }
 
     if has_supabase_config():
-        _supabase_request("devices", method="POST", data=record, headers={"Prefer": "resolution=merge-duplicates"})
+        headers = {"Prefer": "resolution=merge-duplicates,return=representation"}
+        persisted = _supabase_request("devices", method="POST", data=record, headers=headers)
+        if not persisted:
+            # Existing Supabase projects may predate the light_mode column. Keep
+            # telemetry alive while the idempotent SQL migration is being applied.
+            legacy_record = dict(record)
+            legacy_record.pop("light_mode", None)
+            persisted = _supabase_request("devices", method="POST", data=legacy_record, headers=headers)
+            if persisted:
+                print("[Supabase] Heartbeat persisted without light_mode; apply backend/migrations/20261017_add_devices_light_mode.sql")
+        if not persisted:
+            raise RuntimeError("Supabase rejected device heartbeat persistence; see preceding Supabase error")
         return record
 
     # Local fallback
