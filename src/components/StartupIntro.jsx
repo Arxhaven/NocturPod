@@ -39,15 +39,9 @@ export default function StartupIntro({ onComplete }) {
       )}
       {videoFailed && (
         <div className="startup-intro-fallback" aria-hidden="true">
-          <div className="startup-lens">
-            <span className="startup-lens-core" />
-          </div>
-          <h1>NOCTUR<span>POD</span></h1>
-          <p>EDGE SURVEILLANCE SYSTEM</p>
-          <div className="startup-loader"><span /></div>
+          <h1>NocturPod</h1>
         </div>
       )}
-      <span className="startup-corner-label">NP // EDGE SYSTEMS</span>
     </div>
   );
 }
