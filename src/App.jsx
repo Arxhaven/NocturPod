@@ -174,7 +174,7 @@ export default function App() {
     refreshMedia();
     const mediaInterval = setInterval(() => {
       refreshMedia();
-    }, 15000);
+    }, 30000);
 
     return () => clearInterval(mediaInterval);
   }, [activeTab, refreshMedia]);
