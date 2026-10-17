@@ -68,7 +68,8 @@ CORS(
             "allow_headers": [
                 "Content-Type",
                 "Authorization",
-                "X-Device-Token"
+                "X-Device-Token",
+                "X-API-Key"
             ]
         }
     }
