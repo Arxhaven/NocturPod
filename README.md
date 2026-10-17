@@ -14,6 +14,13 @@ Raspberry Pi 4 Edge Node (OV5647 + NocturPod Agent)
 
 ---
 
+## Guide and documentation
+
+- [Project Guide: architecture, complete media flow, actual AI algorithm, interpolation, Pi role, project explanation, limitations and guide/viva notes](docs/PROJECT_GUIDE.md)
+- [Raspberry Pi Setup & Troubleshooting: service configuration, PIR wiring, environment settings and end-to-end tests](docs/RASPBERRY_PI_SETUP.md)
+
+**Before demonstrating hardware:** check that the Pi service has a real backend URL and matching `NOCTURPOD_DEVICE_TOKEN`, and verify the exact camera model. The repository service template uses an external environment file; do not leave placeholder service URLs or dummy tokens.
+
 ## 1. System Architecture
 
 - **Raspberry Pi 4 Model B (8GB)**: Runs `agent/main.py` as a systemd service (`nocturpod-agent.service`). Connects to the OV5647 camera, transmits live MJPEG frames, sends hardware telemetry heartbeats, polls dashboard commands, buffers media locally in `~/nocturpod/media/`, and uploads captures.
