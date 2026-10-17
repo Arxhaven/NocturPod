@@ -4,13 +4,15 @@ import {
   Maximize2,
   Image as ImageIcon,
   Clock,
-  CheckCircle2
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
 import { resolveMediaUrl } from '../services/api';
 import './ImagesScreen.css';
 
 export default function ImagesScreen({ images = [], onSelectImage }) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [failedMedia, setFailedMedia] = useState({});
 
   const filtered = images.filter((img) => {
     if (searchQuery.trim()) {
@@ -58,6 +60,7 @@ export default function ImagesScreen({ images = [], onSelectImage }) {
             const isProcessing = item.processing_status === 'PROCESSING' || item.processing_status === 'PENDING';
             const rawDisplayUrl = isEnhanced ? item.enhanced_url : (item.original_url || item.thumbnail);
             const displayUrl = resolveMediaUrl(rawDisplayUrl);
+            const itemKey = String(item.event_id || item.id);
 
             return (
               <div 
@@ -68,12 +71,17 @@ export default function ImagesScreen({ images = [], onSelectImage }) {
                 tabIndex={0}
               >
                 <div className="img-preview-box">
-                  {displayUrl ? (
-                    <img src={displayUrl} alt={item.event_id || 'Capture'} loading="lazy" />
+                  {displayUrl && !failedMedia[itemKey] ? (
+                    <img
+                      src={displayUrl}
+                      alt={item.event_id || 'Capture'}
+                      loading="lazy"
+                      onError={() => setFailedMedia((previous) => ({ ...previous, [itemKey]: true }))}
+                    />
                   ) : (
                     <div className="placeholder-preview mono">
-                      <Clock size={24} />
-                      <span>PROCESSING</span>
+                      {displayUrl ? <AlertCircle size={24} /> : <Clock size={24} />}
+                      <span>{displayUrl ? 'MEDIA UNAVAILABLE' : (isProcessing ? 'ENHANCING...' : 'NO PREVIEW')}</span>
                     </div>
                   )}
 

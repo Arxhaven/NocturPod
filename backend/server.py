@@ -198,7 +198,14 @@ def device_heartbeat():
 
     payload = request.get_json(silent=True) or {}
     device_id = payload.get("device_id", "nocturpod-edge-01")
-    updated = upsert_device_heartbeat(payload)
+    try:
+        upsert_device_heartbeat(payload)
+    except Exception as exc:
+        print(f"[Heartbeat] Supabase persistence failed for {device_id}: {type(exc).__name__}: {exc}")
+        return jsonify({
+            "error": "Device telemetry could not be persisted",
+            "retryable": True
+        }), 503
     return jsonify({"status": "ACK", "device_id": device_id, "server_time": datetime.datetime.now(datetime.timezone.utc).isoformat()})
 
 

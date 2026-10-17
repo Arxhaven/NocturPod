@@ -1,10 +1,10 @@
 /**
  * NocturPod Production API Service Layer
- * Connects frontend directly to the authentic Render backend.
+ * Connects frontend directly to the deployed Railway backend.
  * Never generates mock responses, simulated data, or fallback frames.
  */
 
-export const DEFAULT_PRODUCTION_API_URL = 'https://nocturpod-njsi.onrender.com';
+export const DEFAULT_PRODUCTION_API_URL = 'https://nocturpod-production.up.railway.app';
 
 export const BACKEND_HOST = (
   (typeof import.meta !== 'undefined' && import.meta.env && (import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL)) ||

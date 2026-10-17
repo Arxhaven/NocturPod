@@ -93,5 +93,22 @@ class SupabaseStorageUrlTests(unittest.TestCase):
         mocked_urlopen.assert_not_called()
 
 
+class HeartbeatSchemaCompatibilityTests(SupabaseStorageUrlTests):
+    def test_heartbeat_retries_without_light_mode_for_older_schema(self):
+        with patch(
+            "backend.database._supabase_request",
+            side_effect=[None, [{"device_id": "nocturpod-edge-01"}]],
+        ) as mocked_request:
+            record = database.upsert_device_heartbeat({"device_id": "nocturpod-edge-01"})
+
+        self.assertEqual(record["device_id"], "nocturpod-edge-01")
+        self.assertEqual(mocked_request.call_count, 2)
+        first_payload = mocked_request.call_args_list[0].kwargs["data"]
+        retry_payload = mocked_request.call_args_list[1].kwargs["data"]
+        self.assertIn("light_mode", first_payload)
+        self.assertNotIn("light_mode", retry_payload)
+        self.assertIn("return=representation", mocked_request.call_args_list[0].kwargs["headers"]["Prefer"])
+
+
 if __name__ == "__main__":
     unittest.main()

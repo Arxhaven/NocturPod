@@ -1,11 +1,11 @@
 # NocturPod Edge Surveillance System
 
-NocturPod is an edge-native night surveillance system engineered around the **Raspberry Pi 4 Model B (8GB)**, **OmniVision OV5647 IR-Cut camera**, and **850nm IR illumination**, coupled to a cloud architecture powered by **Render** (Flask backend), **Supabase** (PostgreSQL & Private Media Storage), and **Vercel** (React Frontend).
+NocturPod is an edge-native night surveillance system engineered around the **Raspberry Pi 4 Model B (8GB)**, **OmniVision OV5647 IR-Cut camera**, and **850nm IR illumination**, coupled to a cloud architecture powered by **Railway** (Flask backend), **Supabase** (PostgreSQL & Private Media Storage), and **Vercel** (React Frontend).
 
 ```
 Vercel Frontend (React + Vite)
       ↓ HTTPS
-Render Backend (Flask + Gunicorn)
+Railway Backend (Flask + Gunicorn)
       ↓ HTTPS / PostgREST
 Supabase (PostgreSQL + Media Storage)
       ↑ HTTPS
@@ -17,7 +17,7 @@ Raspberry Pi 4 Edge Node (OV5647 + NocturPod Agent)
 ## 1. System Architecture
 
 - **Raspberry Pi 4 Model B (8GB)**: Runs `agent/main.py` as a systemd service (`nocturpod-agent.service`). Connects to the OV5647 camera, transmits live MJPEG frames, sends hardware telemetry heartbeats, polls dashboard commands, buffers media locally in `~/nocturpod/media/`, and uploads captures.
-- **Backend (Render / Flask / Gunicorn)**: Ingests real camera streams, verifies `X-Device-Token` authorization, queues commands, manages Supabase PostgreSQL and Supabase Storage access, and executes asynchronous AI enhancement pipelines immediately after media ingestion.
+- **Backend (Railway / Flask / Gunicorn)**: Ingests real camera streams, verifies `X-Device-Token` authorization, queues commands, manages Supabase PostgreSQL and Supabase Storage access, and executes asynchronous AI enhancement pipelines immediately after media ingestion.
 - **AI Enhancement Engine**: Utilizes the genuine Adaptive CLAHE LAB luminance normalization and detail sharpening algorithm from `ai_model_source`, alongside YOLOv8 perimeter security classification. Every capture creates distinct **ORIGINAL** and **ENHANCED** assets.
 - **Frontend (Vercel)**: Displays real camera feed, hardware telemetry, and provides controls for manual still captures, video recording start/stop, and side-by-side inspection and download of Original vs. Enhanced media.
 
@@ -31,7 +31,7 @@ Copy `.env.example` to configure your environment:
 cp .env.example .env
 ```
 
-### Backend (Render / Local):
+### Backend (Railway / Local):
 ```ini
 SUPABASE_URL=https://your-project-id.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
@@ -43,12 +43,12 @@ HOST=0.0.0.0
 
 ### Frontend (Vercel):
 ```ini
-VITE_API_URL=https://your-render-service.onrender.com
+VITE_API_URL=https://nocturpod-production.up.railway.app
 ```
 
 ### Raspberry Pi Agent:
 ```ini
-NOCTURPOD_BACKEND_URL=https://your-render-service.onrender.com
+NOCTURPOD_BACKEND_URL=https://nocturpod-production.up.railway.app
 NOCTURPOD_DEVICE_TOKEN=your-secure-device-token
 NOCTURPOD_DEVICE_ID=nocturpod-edge-01
 ```
@@ -105,11 +105,11 @@ NOCTURPOD_DEVICE_ID=nocturpod-edge-01
 python -m venv .venv
 source .venv/bin/activate # or .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python api_server.py
+python -m backend.server
 ```
 Production test:
 ```bash
-gunicorn api_server:app
+gunicorn --config gunicorn.conf.py backend.server:app
 ```
 
 ### Run Tests:

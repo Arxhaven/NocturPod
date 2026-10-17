@@ -15,6 +15,7 @@ import './VideoPlayerModal.css';
 export default function VideoPlayerModal({ video, onClose, onDelete }) {
   const [viewMode, setViewMode] = useState('ENHANCED'); // 'ENHANCED' or 'ORIGINAL'
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [failedUrls, setFailedUrls] = useState({});
 
   if (!video) return null;
 
@@ -115,19 +116,21 @@ export default function VideoPlayerModal({ video, onClose, onDelete }) {
         </div>
 
         <div className="video-stage">
-          {activeDisplayUrl ? (
-            <video 
+          {activeDisplayUrl && !failedUrls[activeDisplayUrl] ? (
+            <video
               key={activeDisplayUrl}
-              src={activeDisplayUrl} 
-              controls 
-              autoPlay 
+              src={activeDisplayUrl}
+              controls
+              autoPlay
               playsInline
               className="footage-video-el"
+              onError={() => setFailedUrls((previous) => ({ ...previous, [activeDisplayUrl]: true }))}
             />
           ) : (
             <div className="no-media-box mono">
               <AlertCircle size={28} />
               <span>VIDEO CURRENTLY UNAVAILABLE</span>
+              <span className="mono">The recording may be missing from Storage.</span>
             </div>
           )}
         </div>

@@ -30,6 +30,12 @@ CREATE TABLE IF NOT EXISTS devices (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Existing projects may already have devices created before light_mode was added.
+-- This idempotent migration keeps the checked-in schema safe to re-run.
+ALTER TABLE public.devices
+    ADD COLUMN IF NOT EXISTS light_mode TEXT NOT NULL DEFAULT 'WHITE';
+NOTIFY pgrst, 'reload schema';
+
 -- 2. Events Table: Distinct sensor/capture events with unique NP_YYYYMMDD_HHMMSS_### IDs
 CREATE TABLE IF NOT EXISTS events (
     event_id TEXT PRIMARY KEY,

@@ -15,6 +15,7 @@ import './ImageViewerModal.css';
 export default function ImageViewerModal({ image, onClose, onDelete }) {
   const [viewMode, setViewMode] = useState('ENHANCED'); // 'ENHANCED' or 'ORIGINAL'
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [failedUrls, setFailedUrls] = useState({});
 
   if (!image) return null;
 
@@ -122,16 +123,18 @@ export default function ImageViewerModal({ image, onClose, onDelete }) {
         {/* Center Canvas / Media */}
         <div className="viewer-canvas">
           <div className="media-stage">
-            {activeDisplayUrl ? (
-              <img 
-                src={activeDisplayUrl} 
-                alt={image.event_id || 'NocturPod Capture'} 
+            {activeDisplayUrl && !failedUrls[activeDisplayUrl] ? (
+              <img
+                src={activeDisplayUrl}
+                alt={image.event_id || 'NocturPod Capture'}
                 className="viewer-media-image"
+                onError={() => setFailedUrls((previous) => ({ ...previous, [activeDisplayUrl]: true }))}
               />
             ) : (
               <div className="no-media-box mono">
                 <AlertCircle size={28} />
                 <span>MEDIA CURRENTLY UNAVAILABLE</span>
+                <span className="mono">Original file may be missing from Storage.</span>
               </div>
             )}
           </div>
