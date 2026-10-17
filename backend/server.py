@@ -12,6 +12,8 @@ import mimetypes
 import os
 import shutil
 import time
+import tempfile
+import urllib.request
 from pathlib import Path
 from typing import Any, Generator
 
@@ -531,6 +533,109 @@ def upload_media():
         "event_id": event_id,
         "original_storage_path": orig_storage_path
     })
+
+
+# --------------------------------------------------------------------------
+# Legacy Media Enhancement Backfill
+# --------------------------------------------------------------------------
+def _reprocess_existing_media_worker(
+    event_id: str,
+    device_id: str,
+    original_url: str,
+    media_type: str,
+    extension: str,
+) -> None:
+    """Download a persisted ORIGINAL object and run the same enhancement pipeline."""
+    local_original: Path | None = None
+    try:
+        safe_event_id = "".join(ch for ch in event_id if ch.isalnum() or ch in ("-", "_"))
+        suffix = extension if extension and len(extension) <= 8 else (".mp4" if media_type == "VIDEO" else ".jpg")
+        with urllib.request.urlopen(original_url, timeout=45) as response:
+            with tempfile.NamedTemporaryFile(
+                prefix=f"{safe_event_id}_backfill_", suffix=suffix,
+                dir=str(MEDIA_DIR), delete=False
+            ) as temp_file:
+                shutil.copyfileobj(response, temp_file)
+                local_original = Path(temp_file.name)
+
+        date_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+        _process_enhancement_async(event_id, device_id, local_original, media_type, date_str)
+    except Exception as exc:
+        print(f"[AI Backfill] Failed to reprocess legacy event {event_id}: {type(exc).__name__}: {exc}")
+        try:
+            update_event_status(event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED",
+                                notes=f"Legacy enhancement backfill failed: {type(exc).__name__}")
+        except Exception:
+            pass
+    finally:
+        if local_original:
+            try:
+                local_original.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
+@app.post("/api/media/reprocess-missing")
+def reprocess_missing_media():
+    """Queue old events with an ORIGINAL asset but no ENHANCED asset.
+
+    Requires the same device token as the edge agent. This is an explicit one-time
+    backfill endpoint; it never deletes or overwrites original media.
+    """
+    if not verify_device_auth():
+        return jsonify({"error": "Unauthorized device"}), 401
+
+    try:
+        # A single pass covers up to the newest 1000 events. Call again after a
+        # pass has completed if the project has more than 1000 historical events.
+        events = list_events(limit=1000)
+        queued = []
+        skipped = []
+        for event in events:
+            event_id = event.get("event_id")
+            if not event_id or event.get("type") not in ("MANUAL_CAPTURE", "VIDEO_RECORDING"):
+                continue
+            original_url = event.get("original_url")
+            enhanced_url = event.get("enhanced_url")
+            if not original_url:
+                skipped.append({"event_id": event_id, "reason": "original asset URL missing"})
+                continue
+            if enhanced_url:
+                continue
+
+            media_type = "VIDEO" if event.get("type") == "VIDEO_RECORDING" else "IMAGE"
+            parsed_path = original_url.split("?", 1)[0].rstrip("/")
+            extension = Path(parsed_path).suffix.lower()
+            if extension not in (".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".mkv", ".avi"):
+                extension = ".mp4" if media_type == "VIDEO" else ".jpg"
+            if original_url.startswith("/"):
+                original_url = request.host_url.rstrip("/") + original_url
+
+            ENHANCE_EXECUTOR.submit(
+                _reprocess_existing_media_worker,
+                event_id,
+                event.get("device_id") or "nocturpod-edge-01",
+                original_url,
+                media_type,
+                extension,
+            )
+            queued.append(event_id)
+
+        log_system_event(
+            "INFO", "AI_BACKFILL",
+            f"Queued {len(queued)} legacy media enhancement job(s); skipped {len(skipped)} missing original(s)"
+        )
+        return jsonify({
+            "status": "QUEUED",
+            "queued_count": len(queued),
+            "queued_event_ids": queued,
+            "skipped_count": len(skipped),
+            "skipped": skipped,
+            "note": "Originals are preserved. Wait for jobs to finish, then refresh the dashboard."
+        }), 202
+    except Exception as exc:
+        print(f"[AI Backfill] Could not queue legacy media: {type(exc).__name__}: {exc}")
+        return jsonify({"error": "Could not queue legacy media enhancement"}), 500
 
 
 # --------------------------------------------------------------------------
