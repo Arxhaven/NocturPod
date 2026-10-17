@@ -638,6 +638,29 @@ def get_event(event_id: str) -> dict[str, Any] | None:
     return ev
 
 
+
+def _is_stale_enhancement(event: dict[str, Any], stale_after_seconds: int = 3600) -> bool:
+    """Only reconcile enhancement jobs that appear abandoned for at least one hour.
+
+    Active enhancement jobs update events.updated_at when processing begins. This
+    avoids gallery polling incorrectly marking an in-flight image/video as complete.
+    """
+    raw_timestamp = event.get("updated_at") or event.get("timestamp")
+    if not raw_timestamp:
+        return False
+    try:
+        updated_at = datetime.datetime.fromisoformat(str(raw_timestamp).replace("Z", "+00:00"))
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=datetime.timezone.utc)
+        age_seconds = (
+            datetime.datetime.now(datetime.timezone.utc) - updated_at
+        ).total_seconds()
+        return age_seconds > stale_after_seconds
+    except Exception:
+        return False
+
+
+
 def list_events(limit: int = 50, filter_type: str | None = None, search: str | None = None, offset: int = 0) -> list[dict[str, Any]]:
     """Retrieves events in batch with high performance, pre-warming signed URLs and reconciling orphaned records."""
     if has_supabase_config():
@@ -702,7 +725,7 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
             # Orphan reconciliation: if an event is stuck in ENHANCEMENT_PROCESSING or PENDING
             # but has a genuine original asset, reconcile to COMPLETE so the frontend displays it immediately
             status = ev.get("status", "")
-            if status == "ENHANCEMENT_PROCESSING" or (status == "CAPTURE_REQUESTED" and orig):
+            if (status == "ENHANCEMENT_PROCESSING" and _is_stale_enhancement(ev)) or (status == "CAPTURE_REQUESTED" and orig):
                 ev["status"] = "COMPLETE" if (enh or orig) else "FAILED"
                 ev["ai_status"] = "COMPLETE" if enh else "ORIGINAL_PRESERVED"
                 ev["processing_status"] = "COMPLETE" if (enh or orig) else "FAILED"
@@ -787,7 +810,7 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
             ev["detections"] = detections
 
             status = ev.get("status", "")
-            if status == "ENHANCEMENT_PROCESSING" or (status == "CAPTURE_REQUESTED" and orig):
+            if (status == "ENHANCEMENT_PROCESSING" and _is_stale_enhancement(ev)) or (status == "CAPTURE_REQUESTED" and orig):
                 ev["status"] = "COMPLETE" if (enh or orig) else "FAILED"
                 ev["ai_status"] = "COMPLETE" if enh else "ORIGINAL_PRESERVED"
                 ev["processing_status"] = "COMPLETE" if (enh or orig) else "FAILED"
