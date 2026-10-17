@@ -558,6 +558,63 @@ def _is_recent_media_event(event: dict[str, Any], within_seconds: int = 300) -> 
         return False
 
 
+def _reprocess_existing_media_worker(
+    event_id: str,
+    device_id: str,
+    original_source: str,
+    media_type: str,
+    extension: str,
+    base_url: str = "",
+) -> None:
+    """Download a persisted ORIGINAL object and run the same enhancement pipeline.
+
+    Storage paths are preferred over signed URLs so a large historical backfill
+    renews each private Supabase URL when its job actually starts, rather than
+    reusing an expiring URL created when the gallery was first scanned.
+    """
+    local_original: Path | None = None
+    try:
+        safe_event_id = "".join(ch for ch in event_id if ch.isalnum() or ch in ("-", "_"))
+        suffix = extension if extension and len(extension) <= 8 else (".mp4" if media_type == "VIDEO" else ".jpg")
+
+        if original_source.startswith(("original/images/", "original/videos/")):
+            original_url = get_signed_storage_url(original_source)
+        else:
+            original_url = original_source
+        if not original_url:
+            raise RuntimeError("Could not resolve original media URL")
+        if original_url.startswith("/") and base_url:
+            original_url = base_url.rstrip("/") + original_url
+
+        with urllib.request.urlopen(original_url, timeout=45) as response:
+            with tempfile.NamedTemporaryFile(
+                prefix=f"{safe_event_id}_backfill_", suffix=suffix,
+                dir=str(MEDIA_DIR), delete=False
+            ) as temp_file:
+                shutil.copyfileobj(response, temp_file)
+                local_original = Path(temp_file.name)
+
+        date_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+        _process_enhancement_async(event_id, device_id, local_original, media_type, date_str)
+    except Exception as exc:
+        print(f"[AI Backfill] Failed to reprocess legacy event {event_id}: {type(exc).__name__}: {exc}")
+        try:
+            update_event_status(
+                event_id,
+                status="ENHANCEMENT_FAILED",
+                ai_status="FAILED",
+                notes=f"Legacy enhancement backfill failed: {type(exc).__name__}"
+            )
+        except Exception:
+            pass
+    finally:
+        if local_original:
+            try:
+                local_original.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
 def _queue_missing_media_backfill(base_url: str) -> dict[str, Any]:
     """Queue every persisted capture/recording with an ORIGINAL but no ENHANCED asset.
 
@@ -594,17 +651,18 @@ def _queue_missing_media_backfill(base_url: str) -> dict[str, Any]:
                     continue
 
                 original_url = event.get("original_url")
-                if not original_url:
-                    skipped.append({"event_id": str(event_id), "reason": "original asset URL missing"})
+                original_source = event.get("original_storage_path") or original_url
+                if not original_source:
+                    skipped.append({"event_id": str(event_id), "reason": "original asset path missing"})
                     continue
 
                 media_type = "VIDEO" if event_type == "VIDEO_RECORDING" else "IMAGE"
-                parsed_path = original_url.split("?", 1)[0].rstrip("/")
+                parsed_path = original_source.split("?", 1)[0].rstrip("/")
                 extension = Path(parsed_path).suffix.lower()
                 if extension not in (".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".mkv", ".avi"):
                     extension = ".mp4" if media_type == "VIDEO" else ".jpg"
-                if original_url.startswith("/"):
-                    original_url = base_url.rstrip("/") + original_url
+                if not original_source.startswith(("original/images/", "original/videos/")) and original_source.startswith("/"):
+                    original_source = base_url.rstrip("/") + original_source
 
                 # Claim the event before scheduling so repeated requests see a queued item.
                 update_event_status(
@@ -616,9 +674,10 @@ def _queue_missing_media_backfill(base_url: str) -> dict[str, Any]:
                     _reprocess_existing_media_worker,
                     str(event_id),
                     event.get("device_id") or "nocturpod-edge-01",
-                    original_url,
+                    original_source,
                     media_type,
                     extension,
+                    base_url,
                 )
                 queued.append(str(event_id))
 
