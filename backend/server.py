@@ -67,13 +67,28 @@ CORS(
     }
 )
 
-# Device authorization token from environment
-DEVICE_AUTH_TOKEN = os.getenv("NOCTURPOD_DEVICE_TOKEN", "nocturpod-sec-key-replace-with-secure-token")
+# Device authorization token from environment.
+# Environment providers can accidentally preserve a leading/trailing newline or space.
+# Trim surrounding whitespace, but do not alter any other characters in the credential.
+_RAW_DEVICE_AUTH_TOKEN = os.getenv("NOCTURPOD_DEVICE_TOKEN")
+_DEFAULT_DEVICE_AUTH_TOKEN = "nocturpod-sec-key-replace-with-secure-token"
+DEVICE_AUTH_TOKEN = (
+    _RAW_DEVICE_AUTH_TOKEN
+    if _RAW_DEVICE_AUTH_TOKEN is not None
+    else _DEFAULT_DEVICE_AUTH_TOKEN
+).strip()
 _AUTH_TOKEN_FINGERPRINT = hashlib.sha256(DEVICE_AUTH_TOKEN.encode("utf-8")).hexdigest()[:12]
+_raw_token_length = (
+    len(_RAW_DEVICE_AUTH_TOKEN)
+    if _RAW_DEVICE_AUTH_TOKEN is not None
+    else len(_DEFAULT_DEVICE_AUTH_TOKEN)
+)
 print(
     "[Auth] Device-token diagnostic: "
-    f"configured_env={'yes' if os.getenv('NOCTURPOD_DEVICE_TOKEN') else 'no (using default)'}, "
-    f"length={len(DEVICE_AUTH_TOKEN)}, "
+    f"configured_env={'yes' if _RAW_DEVICE_AUTH_TOKEN is not None else 'no (using default)'}, "
+    f"raw_length={_raw_token_length}, "
+    f"normalized_length={len(DEVICE_AUTH_TOKEN)}, "
+    f"whitespace_trimmed={'yes' if _raw_token_length != len(DEVICE_AUTH_TOKEN) else 'no'}, "
     f"fingerprint={_AUTH_TOKEN_FINGERPRINT}"
 )
 
