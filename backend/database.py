@@ -810,7 +810,7 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
 def list_media_events(media_type: str = "IMAGE") -> list[dict[str, Any]]:
     """Fetches completed or in-progress events with original and enhanced media URLs."""
     target_type = "MANUAL_CAPTURE" if media_type == "IMAGE" else "VIDEO_RECORDING"
-    events = list_events(limit=100, filter_type=target_type)
+    events = list_events(limit=1000, filter_type=target_type)
     return events
 
 
