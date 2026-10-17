@@ -12,6 +12,7 @@ import mimetypes
 import os
 import shutil
 import time
+import threading
 import tempfile
 import urllib.request
 from pathlib import Path
@@ -538,106 +539,147 @@ def upload_media():
 # --------------------------------------------------------------------------
 # Legacy Media Enhancement Backfill
 # --------------------------------------------------------------------------
-def _reprocess_existing_media_worker(
-    event_id: str,
-    device_id: str,
-    original_url: str,
-    media_type: str,
-    extension: str,
-) -> None:
-    """Download a persisted ORIGINAL object and run the same enhancement pipeline."""
-    local_original: Path | None = None
+_BACKFILL_QUEUE_LOCK = threading.Lock()
+_AUTO_BACKFILL_GUARD = threading.Lock()
+_AUTO_BACKFILL_STARTED = False
+
+
+def _is_recent_media_event(event: dict[str, Any], within_seconds: int = 300) -> bool:
+    """Leave newly ingested items to the normal upload pipeline."""
+    raw_timestamp = event.get("timestamp")
+    if not raw_timestamp:
+        return False
     try:
-        safe_event_id = "".join(ch for ch in event_id if ch.isalnum() or ch in ("-", "_"))
-        suffix = extension if extension and len(extension) <= 8 else (".mp4" if media_type == "VIDEO" else ".jpg")
-        with urllib.request.urlopen(original_url, timeout=45) as response:
-            with tempfile.NamedTemporaryFile(
-                prefix=f"{safe_event_id}_backfill_", suffix=suffix,
-                dir=str(MEDIA_DIR), delete=False
-            ) as temp_file:
-                shutil.copyfileobj(response, temp_file)
-                local_original = Path(temp_file.name)
-
-        date_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
-        _process_enhancement_async(event_id, device_id, local_original, media_type, date_str)
-    except Exception as exc:
-        print(f"[AI Backfill] Failed to reprocess legacy event {event_id}: {type(exc).__name__}: {exc}")
-        try:
-            update_event_status(event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED",
-                                notes=f"Legacy enhancement backfill failed: {type(exc).__name__}")
-        except Exception:
-            pass
-    finally:
-        if local_original:
-            try:
-                local_original.unlink(missing_ok=True)
-            except Exception:
-                pass
+        timestamp = datetime.datetime.fromisoformat(str(raw_timestamp).replace("Z", "+00:00"))
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=datetime.timezone.utc)
+        return (datetime.datetime.now(datetime.timezone.utc) - timestamp).total_seconds() < within_seconds
+    except Exception:
+        return False
 
 
-@app.post("/api/media/reprocess-missing")
-def reprocess_missing_media():
-    """Queue old events with an ORIGINAL asset but no ENHANCED asset.
+def _queue_missing_media_backfill(base_url: str) -> dict[str, Any]:
+    """Queue every persisted capture/recording with an ORIGINAL but no ENHANCED asset.
 
-    Requires the same device token as the edge agent. This is an explicit one-time
-    backfill endpoint; it never deletes or overwrites original media.
+    The original object and asset record are never overwritten. Event status is
+    claimed before a job is submitted so subsequent gallery refreshes do not queue
+    the same item again.
     """
-    if not verify_device_auth():
-        return jsonify({"error": "Unauthorized device"}), 401
+    queued: list[str] = []
+    skipped: list[dict[str, str]] = []
+    offset = 0
+    page_size = 100
 
-    try:
-        queued = []
-        skipped = []
-        offset = 0
-        page_size = 100
+    with _BACKFILL_QUEUE_LOCK:
         while True:
             events = list_events(limit=page_size, offset=offset)
             if not events:
                 break
+
             for event in events:
                 event_id = event.get("event_id")
-                if not event_id or event.get("type") not in ("MANUAL_CAPTURE", "VIDEO_RECORDING"):
-                    continue
-                original_url = event.get("original_url")
-                enhanced_url = event.get("enhanced_url")
-                if not original_url:
-                    skipped.append({"event_id": event_id, "reason": "original asset URL missing"})
-                    continue
-                if enhanced_url:
+                event_type = event.get("type")
+                if not event_id or event_type not in ("MANUAL_CAPTURE", "VIDEO_RECORDING"):
                     continue
 
-                media_type = "VIDEO" if event.get("type") == "VIDEO_RECORDING" else "IMAGE"
+                # New media is already being handled by /api/media/upload.
+                if _is_recent_media_event(event):
+                    continue
+
+                status = str(event.get("status") or "").upper()
+                ai_status = str(event.get("ai_status") or "").upper()
+                if status in ("AI_BACKFILL_QUEUED", "ENHANCEMENT_PROCESSING") or ai_status == "PROCESSING":
+                    continue
+                if event.get("enhanced_url"):
+                    continue
+
+                original_url = event.get("original_url")
+                if not original_url:
+                    skipped.append({"event_id": str(event_id), "reason": "original asset URL missing"})
+                    continue
+
+                media_type = "VIDEO" if event_type == "VIDEO_RECORDING" else "IMAGE"
                 parsed_path = original_url.split("?", 1)[0].rstrip("/")
                 extension = Path(parsed_path).suffix.lower()
                 if extension not in (".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".mkv", ".avi"):
                     extension = ".mp4" if media_type == "VIDEO" else ".jpg"
                 if original_url.startswith("/"):
-                    original_url = request.host_url.rstrip("/") + original_url
+                    original_url = base_url.rstrip("/") + original_url
 
+                # Claim the event before scheduling so repeated requests see a queued item.
+                update_event_status(
+                    str(event_id),
+                    status="AI_BACKFILL_QUEUED",
+                    ai_status="PROCESSING"
+                )
                 ENHANCE_EXECUTOR.submit(
                     _reprocess_existing_media_worker,
-                    event_id,
+                    str(event_id),
                     event.get("device_id") or "nocturpod-edge-01",
                     original_url,
                     media_type,
                     extension,
                 )
-                queued.append(event_id)
+                queued.append(str(event_id))
+
             if len(events) < page_size:
                 break
             offset += len(events)
 
-        log_system_event(
-            "INFO", "AI_BACKFILL",
-            f"Queued {len(queued)} legacy media enhancement job(s); skipped {len(skipped)} missing original(s)"
-        )
+    log_system_event(
+        "INFO",
+        "AI_BACKFILL",
+        f"Queued {len(queued)} legacy media enhancement job(s); skipped {len(skipped)} missing original(s)"
+    )
+    return {
+        "queued_count": len(queued),
+        "queued_event_ids": queued,
+        "skipped_count": len(skipped),
+        "skipped": skipped,
+    }
+
+
+def _start_auto_backfill(base_url: str) -> None:
+    """Start a single background scan when the gallery is first requested."""
+    global _AUTO_BACKFILL_STARTED
+    with _AUTO_BACKFILL_GUARD:
+        if _AUTO_BACKFILL_STARTED:
+            return
+        _AUTO_BACKFILL_STARTED = True
+
+    def _run() -> None:
+        global _AUTO_BACKFILL_STARTED
+        try:
+            result = _queue_missing_media_backfill(base_url)
+            print(
+                "[AI Backfill] Historical scan finished: "
+                f"queued={result['queued_count']}, skipped_missing_original={result['skipped_count']}"
+            )
+        except Exception as exc:
+            print(f"[AI Backfill] Automatic historical scan failed: {type(exc).__name__}: {exc}")
+            # Let a later gallery request retry after a transient backend/database outage.
+            with _AUTO_BACKFILL_GUARD:
+                _AUTO_BACKFILL_STARTED = False
+
+    threading.Thread(target=_run, name="nocturpod-ai-backfill", daemon=True).start()
+
+
+@app.post("/api/media/reprocess-missing")
+def reprocess_missing_media():
+    """Explicitly queue legacy originals with no enhanced asset.
+
+    Requires the same device token as the edge agent. This endpoint is useful for
+    retrying failures; the gallery also starts a one-time automatic backfill.
+    """
+    if not verify_device_auth():
+        return jsonify({"error": "Unauthorized device"}), 401
+
+    try:
+        result = _queue_missing_media_backfill(request.host_url.rstrip("/"))
         return jsonify({
             "status": "QUEUED",
-            "queued_count": len(queued),
-            "queued_event_ids": queued,
-            "skipped_count": len(skipped),
-            "skipped": skipped,
-            "note": "All event pages were scanned. Originals are preserved. Wait for jobs to finish, then refresh the dashboard."
+            **result,
+            "note": "Originals are preserved. Refresh the gallery after jobs finish.",
         }), 202
     except Exception as exc:
         print(f"[AI Backfill] Could not queue legacy media: {type(exc).__name__}: {exc}")
@@ -687,12 +729,14 @@ def delete_all_events_route():
 
 @app.get("/api/media/images")
 def get_images():
+    _start_auto_backfill(request.host_url.rstrip("/"))
     captures = list_media_events("IMAGE")
     return jsonify(captures)
 
 
 @app.get("/api/media/footage")
 def get_footage():
+    _start_auto_backfill(request.host_url.rstrip("/"))
     recordings = list_media_events("VIDEO")
     return jsonify(recordings)
 
