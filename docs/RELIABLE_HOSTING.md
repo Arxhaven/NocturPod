@@ -9,7 +9,7 @@ That cache is a resilience aid, not the source of truth. Supabase PostgreSQL and
 ## Durable production architecture
 
 - **Vercel:** static React frontend only.
-- **Always-on VPS or budgeted always-on container:** Flask/Gunicorn API and live-stream relay. This repository now includes a `Dockerfile` for that deployment target.
+- **Always-on VPS or budgeted always-on container:** Flask/Gunicorn API and live-stream relay. This repository includes a VPS-specific Dockerfile at `deploy/vps.Dockerfile`.
 - **Supabase:** persistent device, event, media-asset and detection records, plus originals/enhanced files in the private Storage bucket. Do not rely on container-local files as the only copy.
 - **Raspberry Pi:** continues sending heartbeats, commands and stream frames to the API's HTTPS URL.
 
@@ -20,7 +20,7 @@ There is no guaranteed lifetime-free host for a continuously running live-video 
 1. Provision an always-on Linux VPS with at least 2 GB RAM; 4 GB gives more headroom for the YOLO/OpenCV pipeline. Use an x86_64 image compatible with the current Python wheels unless you have separately tested ARM support.
 2. Install Docker and Docker Compose, clone this repository, and build the image:
    ```bash
-   docker build -t nocturpod-api .
+   docker build -f deploy/vps.Dockerfile -t nocturpod-api .
    ```
 3. Create a server-side `.env` file based on `.env.example`. Set the real `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_BUCKET`, and `NOCTURPOD_DEVICE_TOKEN`. Never commit this file or expose the service-role key to Vercel.
 4. Run the API behind an HTTPS reverse proxy (for example, Caddy) with automatic TLS for a DNS name. Do not expose a plain HTTP API to the HTTPS frontend.
