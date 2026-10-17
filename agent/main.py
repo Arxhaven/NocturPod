@@ -50,6 +50,7 @@ class NocturPodAgent:
         self.streamer = StreamManager(self.camera, self.api_client)
 
     def heartbeat_worker(self) -> None:
+        """Send telemetry on its own schedule; never wait for media uploads."""
         while self.is_running:
             try:
                 telemetry = collect_device_telemetry(
@@ -58,11 +59,20 @@ class NocturPodAgent:
                     light_mode=self.lighting.get_mode()
                 )
                 self.api_client.send_heartbeat(telemetry)
-                # Also process any pending offline spooled uploads
-                self.spool.process_pending_uploads()
             except Exception as e:
-                pass
+                print(f"[Heartbeat] Worker error: {e}")
             time.sleep(HEARTBEAT_INTERVAL)
+
+    def upload_worker(self) -> None:
+        """Retry queued media independently so large uploads cannot starve heartbeats."""
+        while self.is_running:
+            try:
+                uploaded = self.spool.process_pending_uploads()
+                if uploaded:
+                    print(f"[Spool] Background worker uploaded {uploaded} pending file(s)")
+            except Exception as e:
+                print(f"[Spool] Background worker error: {e}")
+            time.sleep(2.0)
 
     def command_poll_worker(self) -> None:
         while self.is_running:
@@ -71,7 +81,7 @@ class NocturPodAgent:
                 for cmd in commands:
                     self.execute_command(cmd)
             except Exception as e:
-                pass
+                print(f"[Commands] Worker error: {e}")
             time.sleep(COMMAND_POLL_INTERVAL)
 
     def execute_command(self, cmd: dict) -> None:
@@ -117,8 +127,10 @@ class NocturPodAgent:
         # Start background threads
         t_hb = threading.Thread(target=self.heartbeat_worker, name="heartbeat", daemon=True)
         t_cmd = threading.Thread(target=self.command_poll_worker, name="commands", daemon=True)
+        t_upload = threading.Thread(target=self.upload_worker, name="media-uploader", daemon=True)
         t_hb.start()
         t_cmd.start()
+        t_upload.start()
 
         print("[NocturPod Agent] Edge daemon running. Streaming real camera frames...")
         try:
