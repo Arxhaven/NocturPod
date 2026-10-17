@@ -639,15 +639,16 @@ def _queue_missing_media_backfill(base_url: str) -> dict[str, Any]:
                 if not event_id or event_type not in ("MANUAL_CAPTURE", "VIDEO_RECORDING"):
                     continue
 
-                # New media is already being handled by /api/media/upload.
-                if _is_recent_media_event(event):
-                    continue
-
                 status = str(event.get("status") or "").upper()
                 ai_status = str(event.get("ai_status") or "").upper()
                 if status in ("AI_BACKFILL_QUEUED", "ENHANCEMENT_PROCESSING") or ai_status == "PROCESSING":
                     continue
                 if event.get("enhanced_url"):
+                    continue
+
+                # New uploads are handled by /api/media/upload. However, retry a
+                # recently captured item immediately if its first enhancement failed.
+                if _is_recent_media_event(event) and status != "ENHANCEMENT_FAILED" and ai_status not in ("FAILED", "ORIGINAL_PRESERVED"):
                     continue
 
                 original_url = event.get("original_url")
