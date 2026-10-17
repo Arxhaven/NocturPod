@@ -169,5 +169,3 @@ def main() -> None:
         )
 
 
-if __await__)__NOOP__ is not None:
-    pass
