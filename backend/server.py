@@ -586,40 +586,46 @@ def reprocess_missing_media():
         return jsonify({"error": "Unauthorized device"}), 401
 
     try:
-        # A single pass covers up to the newest 1000 events. Call again after a
-        # pass has completed if the project has more than 1000 historical events.
-        events = list_events(limit=1000)
         queued = []
         skipped = []
-        for event in events:
-            event_id = event.get("event_id")
-            if not event_id or event.get("type") not in ("MANUAL_CAPTURE", "VIDEO_RECORDING"):
-                continue
-            original_url = event.get("original_url")
-            enhanced_url = event.get("enhanced_url")
-            if not original_url:
-                skipped.append({"event_id": event_id, "reason": "original asset URL missing"})
-                continue
-            if enhanced_url:
-                continue
+        offset = 0
+        page_size = 100
+        while True:
+            events = list_events(limit=page_size, offset=offset)
+            if not events:
+                break
+            for event in events:
+                event_id = event.get("event_id")
+                if not event_id or event.get("type") not in ("MANUAL_CAPTURE", "VIDEO_RECORDING"):
+                    continue
+                original_url = event.get("original_url")
+                enhanced_url = event.get("enhanced_url")
+                if not original_url:
+                    skipped.append({"event_id": event_id, "reason": "original asset URL missing"})
+                    continue
+                if enhanced_url:
+                    continue
 
-            media_type = "VIDEO" if event.get("type") == "VIDEO_RECORDING" else "IMAGE"
-            parsed_path = original_url.split("?", 1)[0].rstrip("/")
-            extension = Path(parsed_path).suffix.lower()
-            if extension not in (".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".mkv", ".avi"):
-                extension = ".mp4" if media_type == "VIDEO" else ".jpg"
-            if original_url.startswith("/"):
-                original_url = request.host_url.rstrip("/") + original_url
+                media_type = "VIDEO" if event.get("type") == "VIDEO_RECORDING" else "IMAGE"
+                parsed_path = original_url.split("?", 1)[0].rstrip("/")
+                extension = Path(parsed_path).suffix.lower()
+                if extension not in (".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".mkv", ".avi"):
+                    extension = ".mp4" if media_type == "VIDEO" else ".jpg"
+                if original_url.startswith("/"):
+                    original_url = request.host_url.rstrip("/") + original_url
 
-            ENHANCE_EXECUTOR.submit(
-                _reprocess_existing_media_worker,
-                event_id,
-                event.get("device_id") or "nocturpod-edge-01",
-                original_url,
-                media_type,
-                extension,
-            )
-            queued.append(event_id)
+                ENHANCE_EXECUTOR.submit(
+                    _reprocess_existing_media_worker,
+                    event_id,
+                    event.get("device_id") or "nocturpod-edge-01",
+                    original_url,
+                    media_type,
+                    extension,
+                )
+                queued.append(event_id)
+            if len(events) < page_size:
+                break
+            offset += len(events)
 
         log_system_event(
             "INFO", "AI_BACKFILL",
@@ -631,7 +637,7 @@ def reprocess_missing_media():
             "queued_event_ids": queued,
             "skipped_count": len(skipped),
             "skipped": skipped,
-            "note": "Originals are preserved. Wait for jobs to finish, then refresh the dashboard."
+            "note": "All event pages were scanned. Originals are preserved. Wait for jobs to finish, then refresh the dashboard."
         }), 202
     except Exception as exc:
         print(f"[AI Backfill] Could not queue legacy media: {type(exc).__name__}: {exc}")
