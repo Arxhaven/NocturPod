@@ -220,6 +220,48 @@ def delete_from_supabase_storage(storage_paths: list[str]) -> bool:
         return False
 
 
+
+def download_from_supabase_storage(storage_path: str, destination: Path | str) -> bool:
+    """Download a private Storage object to a local file for server-side processing."""
+    if not has_supabase_config():
+        return False
+    normalized_path = _normalize_storage_path(storage_path)
+    if not normalized_path:
+        print("[Supabase Storage] Refusing to download an invalid object path")
+        return False
+
+    bucket = urllib.parse.quote(SUPABASE_STORAGE_BUCKET, safe="")
+    encoded_path = _encode_storage_path(normalized_path)
+    url = f"{SUPABASE_URL}/storage/v1/object/{bucket}/{encoded_path}"
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+    }
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    output = Path(destination)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with urllib.request.urlopen(req, timeout=60.0) as response, output.open("wb") as stream:
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                stream.write(chunk)
+        if output.is_file() and output.stat().st_size > 0:
+            return True
+        output.unlink(missing_ok=True)
+        return False
+    except urllib.error.HTTPError as exc:
+        try:
+            detail = exc.read(500).decode("utf-8", "replace")
+        except Exception:
+            detail = ""
+        print(f"[Supabase Storage] Download failed for {normalized_path}: HTTP {exc.code}: {detail}")
+    except Exception as exc:
+        print(f"[Supabase Storage] Download failed for {normalized_path}: {type(exc).__name__}: {exc}")
+    output.unlink(missing_ok=True)
+    return False
+
 # -----------------------------------------------------------------------------
 # Local Fallback SQLite Initialization
 # -----------------------------------------------------------------------------
@@ -540,6 +582,44 @@ def update_event_status(event_id: str, status: str, ai_status: str | None = None
         conn.commit()
 
 
+
+def get_media_assets_for_event(event_id: str) -> list[dict[str, Any]]:
+    """Return ORIGINAL and ENHANCED asset metadata for a single event."""
+    if has_supabase_config():
+        encoded_id = urllib.parse.quote(str(event_id), safe="")
+        return _supabase_request(f"media_assets?event_id=eq.{encoded_id}&select=*") or []
+    with _LOCK, _get_local_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM media_assets WHERE event_id = ? ORDER BY created_at ASC",
+            (event_id,)
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def list_all_media_assets(batch_size: int = 1000) -> list[dict[str, Any]]:
+    """Fetch all media asset rows in pages for a full historical enhancement backfill."""
+    if not has_supabase_config():
+        with _LOCK, _get_local_connection() as conn:
+            rows = conn.execute("SELECT * FROM media_assets ORDER BY created_at ASC").fetchall()
+            return [dict(row) for row in rows]
+
+    assets: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        batch = _supabase_request(
+            f"media_assets?select=*&order=created_at.asc&limit={batch_size}&offset={offset}"
+        ) or []
+        assets.extend(batch)
+        if len(batch) < batch_size:
+            break
+        offset += batch_size
+        # Protect the service from endless paging if a malformed API response is returned.
+        if offset >= 100000:
+            print("[Supabase] Media-asset backfill stopped at the 100,000-row safety limit")
+            break
+    return assets
+
+
 def record_media_asset(data: dict[str, Any]) -> dict[str, Any]:
     asset_id = data.get("id") or f"asset_{generate_event_id()[3:]}_{data.get('variant', 'orig').lower()}"
     record = {
@@ -808,10 +888,9 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
 
 
 def list_media_events(media_type: str = "IMAGE") -> list[dict[str, Any]]:
-    """Fetches completed or in-progress events with original and enhanced media URLs."""
+    """Fetch recent captures with both variants; use a larger limit so older gallery items remain visible."""
     target_type = "MANUAL_CAPTURE" if media_type == "IMAGE" else "VIDEO_RECORDING"
-    events = list_events(limit=100, filter_type=target_type)
-    return events
+    return list_events(limit=1000, filter_type=target_type)
 
 
 def delete_event(event_id: str) -> bool:
