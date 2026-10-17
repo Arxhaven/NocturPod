@@ -71,28 +71,58 @@ def _supabase_request(endpoint: str, method: str = "GET", data: dict | list | No
         with urllib.request.urlopen(req, timeout=8.0) as resp:
             content = resp.read().decode("utf-8")
             return json.loads(content) if content else None
-    except Exception as e:
-        print(f"[Supabase] Request failed ({method} {url}): {e}")
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read(500).decode("utf-8", "replace").replace("\\n", " ")
+        except Exception:
+            detail = ""
+        print(f"[Supabase] Request failed ({method} {endpoint.split('?')[0]}): HTTP {e.code}: {detail}")
         return None
+    except Exception as e:
+        print(f"[Supabase] Request failed ({method} {endpoint.split('?')[0]}): {type(e).__name__}: {e}")
+        return None
+
+
+def _normalize_storage_path(storage_path: str) -> str | None:
+    """Validate and normalize a Storage object key without altering its literal characters."""
+    if not storage_path or not isinstance(storage_path, str):
+        return None
+    normalized = storage_path.strip().lstrip("/")
+    if (
+        not normalized
+        or "\\" in normalized
+        or any(part in ("", ".", "..") for part in normalized.split("/"))
+    ):
+        return None
+    return normalized
+
+
+def _encode_storage_path(storage_path: str) -> str:
+    """URL-encode each object-key segment while keeping '/' as the path separator."""
+    return "/".join(urllib.parse.quote(part, safe="") for part in storage_path.split("/"))
 
 
 def get_signed_storage_url(storage_path: str, expires_in: int = 7200) -> str | None:
-    """Generates a secure signed URL from Supabase Storage for private media assets with in-memory caching."""
-    if not storage_path:
+    """Generate a signed URL for a private Storage object, safely encoding its object key."""
+    normalized_path = _normalize_storage_path(storage_path)
+    if not normalized_path:
+        print("[Supabase Storage] Refusing to sign an invalid object path")
         return None
 
+    encoded_path = _encode_storage_path(normalized_path)
+    fallback_url = f"/api/media/file/{encoded_path}"
     if not has_supabase_config():
-        # Fallback to backend media route if not configured
-        return f"/api/media/file/{storage_path}"
+        return fallback_url
 
     now_ts = time.time()
-    cached = _SIGNED_URL_CACHE.get(storage_path)
+    cached = _SIGNED_URL_CACHE.get(normalized_path)
     if cached:
-        url, exp = cached
-        if now_ts < (exp - 300):  # Valid with 5-minute safety threshold
-            return url
+        signed_url, expires_at = cached
+        if now_ts < (expires_at - 300):
+            return signed_url
 
-    url = f"{SUPABASE_URL}/storage/v1/object/sign/{SUPABASE_STORAGE_BUCKET}/{storage_path.lstrip('/')}"
+    bucket = urllib.parse.quote(SUPABASE_STORAGE_BUCKET, safe="")
+    url = f"{SUPABASE_URL}/storage/v1/object/sign/{bucket}/{encoded_path}"
     req_headers = {
         "apikey": SUPABASE_SERVICE_ROLE_KEY,
         "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
@@ -101,28 +131,51 @@ def get_signed_storage_url(storage_path: str, expires_in: int = 7200) -> str | N
     body = json.dumps({"expiresIn": expires_in}).encode("utf-8")
     req = urllib.request.Request(url, data=body, headers=req_headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=6.0) as resp:
+        with urllib.request.urlopen(req, timeout=8.0) as resp:
             res = json.loads(resp.read().decode("utf-8"))
             signed_path = res.get("signedURL")
-            if signed_path:
+            if not isinstance(signed_path, str) or not signed_path:
+                print(f"[Supabase Storage] Signing returned no URL for object key {normalized_path}")
+                return fallback_url
+
+            if signed_path.startswith(("https://", "http://")):
+                full_url = signed_path
+            elif signed_path.startswith("/storage/v1/"):
+                full_url = f"{SUPABASE_URL}{signed_path}"
+            elif signed_path.startswith("/"):
                 full_url = f"{SUPABASE_URL}/storage/v1{signed_path}"
-                _SIGNED_URL_CACHE[storage_path] = (full_url, now_ts + expires_in)
-                return full_url
+            else:
+                full_url = f"{SUPABASE_URL}/storage/v1/{signed_path.lstrip('/')}"
+
+            _SIGNED_URL_CACHE[normalized_path] = (full_url, time.time() + expires_in)
+            return full_url
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read(500).decode("utf-8", "replace").replace("\\n", " ")
+        except Exception:
+            detail = ""
+        print(f"[Supabase Storage] Signing failed for {normalized_path}: HTTP {e.code}: {detail}")
     except Exception as e:
-        print(f"[Supabase Storage] Signed URL generation failed for {storage_path}: {e}")
-    return f"/api/media/file/{storage_path}"
-
-
+        print(f"[Supabase Storage] Signing failed for {normalized_path}: {type(e).__name__}: {e}")
+    return fallback_url
 
 def upload_to_supabase_storage(local_path: Path | str, storage_path: str, content_type: str = "image/jpeg") -> bool:
-    """Uploads file to the Supabase Storage bucket."""
+    """Upload a local file to Supabase Storage using a safely encoded object key."""
     if not has_supabase_config():
         return False
+
     local_p = Path(local_path)
-    if not local_p.exists():
+    normalized_path = _normalize_storage_path(storage_path)
+    if not normalized_path:
+        print("[Supabase Storage] Refusing to upload to an invalid object path")
+        return False
+    if not local_p.is_file():
+        print(f"[Supabase Storage] Upload source file does not exist: {local_p}")
         return False
 
-    url = f"{SUPABASE_URL}/storage/v1/object/{SUPABASE_STORAGE_BUCKET}/{storage_path.lstrip('/')}"
+    bucket = urllib.parse.quote(SUPABASE_STORAGE_BUCKET, safe="")
+    encoded_path = _encode_storage_path(normalized_path)
+    url = f"{SUPABASE_URL}/storage/v1/object/{bucket}/{encoded_path}"
     req_headers = {
         "apikey": SUPABASE_SERVICE_ROLE_KEY,
         "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
@@ -135,10 +188,16 @@ def upload_to_supabase_storage(local_path: Path | str, storage_path: str, conten
         req = urllib.request.Request(url, data=data, headers=req_headers, method="POST")
         with urllib.request.urlopen(req, timeout=25.0) as resp:
             return resp.status in (200, 201)
-    except Exception as e:
-        print(f"[Supabase Storage] Upload error ({storage_path}): {e}")
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read(500).decode("utf-8", "replace").replace("\\n", " ")
+        except Exception:
+            detail = ""
+        print(f"[Supabase Storage] Upload failed for {normalized_path}: HTTP {e.code}: {detail}")
         return False
-
+    except Exception as e:
+        print(f"[Supabase Storage] Upload failed for {normalized_path}: {type(e).__name__}: {e}")
+        return False
 
 def delete_from_supabase_storage(storage_paths: list[str]) -> bool:
     """Deletes multiple files from the Supabase Storage bucket."""
@@ -418,7 +477,14 @@ def create_event(data: dict[str, Any]) -> dict[str, Any]:
     }
 
     if has_supabase_config():
-        _supabase_request("events", method="POST", data=record, headers={"Prefer": "resolution=merge-duplicates"})
+        persisted = _supabase_request(
+            "events",
+            method="POST",
+            data=record,
+            headers={"Prefer": "resolution=merge-duplicates,return=representation"}
+        )
+        if not persisted:
+            raise RuntimeError(f"Supabase did not confirm event persistence for {event_id}")
     else:
         with _LOCK, _get_local_connection() as conn:
             conn.execute("""
@@ -480,7 +546,14 @@ def record_media_asset(data: dict[str, Any]) -> dict[str, Any]:
     }
 
     if has_supabase_config():
-        _supabase_request("media_assets", method="POST", data=record, headers={"Prefer": "resolution=merge-duplicates"})
+        persisted = _supabase_request(
+            "media_assets",
+            method="POST",
+            data=record,
+            headers={"Prefer": "resolution=merge-duplicates,return=representation"}
+        )
+        if not persisted:
+            raise RuntimeError(f"Supabase did not confirm media-asset persistence for {asset_id}")
     else:
         with _LOCK, _get_local_connection() as conn:
             conn.execute("""
@@ -627,7 +700,10 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
                 if enh:
                     ev["processing_status"] = enh.get("processing_status", "COMPLETE")
                 elif orig:
-                    ev["processing_status"] = "COMPLETE" if status in ("COMPLETE", "CAPTURED", "RECORDED") else "PENDING"
+                    if status == "ENHANCEMENT_FAILED":
+                        ev["processing_status"] = "FAILED"
+                    else:
+                        ev["processing_status"] = "COMPLETE" if status in ("COMPLETE", "CAPTURED", "RECORDED") else "PENDING"
                 else:
                     ev["processing_status"] = "NONE"
 
@@ -708,7 +784,10 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
                 if enh:
                     ev["processing_status"] = enh.get("processing_status", "COMPLETE")
                 elif orig:
-                    ev["processing_status"] = "COMPLETE" if status in ("COMPLETE", "CAPTURED", "RECORDED") else "PENDING"
+                    if status == "ENHANCEMENT_FAILED":
+                        ev["processing_status"] = "FAILED"
+                    else:
+                        ev["processing_status"] = "COMPLETE" if status in ("COMPLETE", "CAPTURED", "RECORDED") else "PENDING"
                 else:
                     ev["processing_status"] = "NONE"
 
