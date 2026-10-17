@@ -23,7 +23,8 @@ import {
   triggerSnapshot, 
   toggleRecording,
   deleteEvent,
-  setLightMode
+  setLightMode,
+  enqueueMissingEnhancements
 } from './services/api';
 import './App.css';
 
@@ -67,6 +68,7 @@ export default function App() {
   const [isRecording, setIsRecording] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [isSwitchingLight, setIsSwitchingLight] = useState(false);
+  const [isBackfillSubmitting, setIsBackfillSubmitting] = useState(false);
   const [toastNotification, setToastNotification] = useState(null);
   const isPollingRef = useRef(false);
 
@@ -102,6 +104,31 @@ export default function App() {
       console.warn("Media sync notice:", err);
     }
   }, []);
+
+  // One-click backfill for original-only captures stored before the AI pipeline was enabled.
+  const handleEnhanceMissing = useCallback(async () => {
+    if (isBackfillSubmitting) return;
+    setIsBackfillSubmitting(true);
+    try {
+      const result = await enqueueMissingEnhancements('ALL');
+      await refreshMedia();
+      const queued = Number(result.queued || 0);
+      const alreadyEnhanced = Number(result.already_enhanced || 0);
+      const alreadyProcessing = Number(result.already_processing || 0);
+
+      if (queued > 0) {
+        showToast(`AI BACKFILL QUEUED: ${queued} legacy item(s). Originals remain unchanged.`);
+      } else if (alreadyEnhanced > 0 || alreadyProcessing > 0) {
+        showToast(`No new jobs needed: ${alreadyEnhanced} already enhanced, ${alreadyProcessing} already processing.`);
+      } else {
+        showToast('No eligible historical original media was found. Check the archive and backend logs.', true);
+      }
+    } catch (err) {
+      showToast(`AI backfill failed: ${err.message}`, true);
+    } finally {
+      setIsBackfillSubmitting(false);
+    }
+  }, [isBackfillSubmitting, refreshMedia, showToast]);
 
   // Single authoritative polling loop for device telemetry
   useEffect(() => {
@@ -166,9 +193,13 @@ export default function App() {
 
   // Refresh media when switching to media/events tabs
   useEffect(() => {
-    if (activeTab === 'images' || activeTab === 'footage' || activeTab === 'events') {
-      refreshMedia();
+    if (activeTab !== 'images' && activeTab !== 'footage' && activeTab !== 'events') {
+      return undefined;
     }
+    refreshMedia();
+    // Long-running video enhancement can take time; keep the active archive status fresh.
+    const mediaRefreshInterval = setInterval(refreshMedia, 10000);
+    return () => clearInterval(mediaRefreshInterval);
   }, [activeTab, refreshMedia]);
 
   // Genuine Edge Snapshot Capture flow
@@ -342,6 +373,8 @@ export default function App() {
             <ImagesScreen 
               images={images}
               onSelectImage={setSelectedImage}
+              onEnhanceMissing={handleEnhanceMissing}
+              isEnhancingMissing={isBackfillSubmitting}
             />
           )}
 
@@ -349,6 +382,8 @@ export default function App() {
             <FootageScreen 
               footageList={footage}
               onSelectVideo={setSelectedVideo}
+              onEnhanceMissing={handleEnhanceMissing}
+              isEnhancingMissing={isBackfillSubmitting}
             />
           )}
 
