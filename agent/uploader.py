@@ -6,6 +6,7 @@ Guarantees zero media loss during network interruptions:
 from __future__ import annotations
 
 import json
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ SPOOL_MANIFEST = MEDIA_BASE_DIR / "spool_manifest.json"
 class SpoolUploader:
     def __init__(self, api_client: NocturPodApiClient):
         self.api_client = api_client
+        self._lock = threading.RLock()
         self._load_manifest()
 
     def _load_manifest(self) -> None:
@@ -31,10 +33,11 @@ class SpoolUploader:
         self.queue = []
 
     def _save_manifest(self) -> None:
-        try:
-            SPOOL_MANIFEST.write_text(json.dumps(self.queue, indent=2), encoding="utf-8")
-        except Exception as e:
-            print(f"[Spool] Failed to write spool manifest: {e}")
+        with self._lock:
+            try:
+                SPOOL_MANIFEST.write_text(json.dumps(self.queue, indent=2), encoding="utf-8")
+            except Exception as e:
+                print(f"[Spool] Failed to write spool manifest: {e}")
 
     def enqueue(self, file_path: Path, event_id: str, media_type: str, duration: str = "0s") -> None:
         item = {
@@ -44,21 +47,28 @@ class SpoolUploader:
             "duration": duration,
             "queued_at": time.time()
         }
-        self.queue.append(item)
-        self._save_manifest()
-        print(f"[Spool] Queued {file_path.name} for offline retry ({len(self.queue)} items pending)")
+        with self._lock:
+            self.queue.append(item)
+            self._save_manifest()
+            pending_count = len(self.queue)
+        print(f"[Spool] Queued {file_path.name} for offline retry ({pending_count} items pending)")
 
     def process_pending_uploads(self) -> int:
-        """Attempts to upload all pending spooled items. Returns count of uploaded items."""
-        if not self.queue:
-            return 0
+        """Retries queued items without blocking new enqueues during network I/O."""
+        with self._lock:
+            if not self.queue:
+                return 0
+            pending = list(self.queue)
+            self.queue = []
+            self._save_manifest()
 
         remaining: list[dict[str, Any]] = []
         uploaded_count = 0
 
-        for item in self.queue:
+        for item in pending:
             path = Path(item["file_path"])
             if not path.exists():
+                print(f"[Spool] Dropping missing queued file: {path}")
                 continue
 
             success = self.api_client.upload_media(
@@ -73,6 +83,8 @@ class SpoolUploader:
             else:
                 remaining.append(item)
 
-        self.queue = remaining
-        self._save_manifest()
+        # Preserve FIFO order: older failed entries stay ahead of new enqueues.
+        with self._lock:
+            self.queue = remaining + self.queue
+            self._save_manifest()
         return uploaded_count
