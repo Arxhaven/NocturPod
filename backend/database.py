@@ -638,10 +638,10 @@ def get_event(event_id: str) -> dict[str, Any] | None:
     return ev
 
 
-def list_events(limit: int = 50, filter_type: str | None = None, search: str | None = None) -> list[dict[str, Any]]:
+def list_events(limit: int = 50, filter_type: str | None = None, search: str | None = None, offset: int = 0) -> list[dict[str, Any]]:
     """Retrieves events in batch with high performance, pre-warming signed URLs and reconciling orphaned records."""
     if has_supabase_config():
-        query = f"events?select=*&order=timestamp.desc&limit={limit}"
+        query = f"events?select=*&order=timestamp.desc&limit={limit}&offset={max(0, int(offset))}"
         if filter_type and filter_type != "ALL":
             query += f"&type=eq.{filter_type}"
         if search and search.strip():
@@ -748,8 +748,8 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
             params.extend([s_param, s_param])
         if conds:
             q += " WHERE " + " AND ".join(conds)
-        q += " ORDER BY timestamp DESC LIMIT ?"
-        params.append(limit)
+        q += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+        params.extend([limit, max(0, int(offset))])
 
         rows = conn.execute(q, tuple(params)).fetchall()
         if not rows:
