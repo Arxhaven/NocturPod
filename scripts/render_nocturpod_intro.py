@@ -168,4 +168,5 @@ def main() -> None:
             f"{B64_OUTPUT.relative_to(ROOT)}"
         )
 
-
+if __name__ == "__main__":
+    main()
