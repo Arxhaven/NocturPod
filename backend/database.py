@@ -779,24 +779,40 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
             ev["media_type"] = "VIDEO" if ev.get("type") == "VIDEO_RECORDING" else "IMAGE"
             ev["detections"] = detections
 
-            # Orphan reconciliation: if an event is stuck in ENHANCEMENT_PROCESSING or PENDING
-            # but has a genuine original asset, reconcile to COMPLETE so the frontend displays it immediately
+            # Do not mark active enhancement jobs complete merely because the gallery polls.
+            # Only reconcile a stuck processing event when its ENHANCED asset really exists.
             status = ev.get("status", "")
-            if status == "ENHANCEMENT_PROCESSING" or (status == "CAPTURE_REQUESTED" and orig):
-                ev["status"] = "COMPLETE" if (enh or orig) else "FAILED"
-                ev["ai_status"] = "COMPLETE" if enh else "ORIGINAL_PRESERVED"
-                ev["processing_status"] = "COMPLETE" if (enh or orig) else "FAILED"
-                orphaned_to_fix.append(eid)
-            else:
+            ai_status = str(ev.get("ai_status") or "").upper()
+            if status == "ENHANCEMENT_PROCESSING":
                 if enh:
-                    ev["processing_status"] = enh.get("processing_status", "COMPLETE")
-                elif orig:
-                    if status == "ENHANCEMENT_FAILED":
-                        ev["processing_status"] = "FAILED"
-                    else:
-                        ev["processing_status"] = "COMPLETE" if status in ("COMPLETE", "CAPTURED", "RECORDED") else "PENDING"
+                    ev["status"] = "COMPLETE"
+                    ev["ai_status"] = "COMPLETE"
+                    ev["processing_status"] = "COMPLETE"
+                    orphaned_to_fix.append(eid)
                 else:
-                    ev["processing_status"] = "NONE"
+                    ev["processing_status"] = "PROCESSING"
+            elif status == "CAPTURE_REQUESTED" and orig:
+                ev["status"] = "COMPLETE"
+                ev["ai_status"] = "COMPLETE" if enh else "ORIGINAL_PRESERVED"
+                ev["processing_status"] = "COMPLETE" if enh else "AVAILABLE"
+                orphaned_to_fix.append(eid)
+            elif enh:
+                ev["processing_status"] = enh.get("processing_status", "COMPLETE")
+            elif orig:
+                if status == "ENHANCEMENT_FAILED" or ai_status == "FAILED":
+                    ev["processing_status"] = "FAILED"
+                elif ai_status == "PROCESSING":
+                    ev["processing_status"] = "PROCESSING"
+                elif ai_status == "ORIGINAL_PRESERVED":
+                    ev["processing_status"] = "AVAILABLE"
+                elif status in ("CAPTURED", "RECORDED") and ai_status == "PENDING":
+                    ev["processing_status"] = "PENDING"
+                else:
+                    # An original asset exists but no enhanced derivative is registered.
+                    # "AVAILABLE" keeps it reviewable and makes it eligible for backfill.
+                    ev["processing_status"] = "AVAILABLE"
+            else:
+                ev["processing_status"] = "NONE"
 
             results.append(ev)
 
@@ -867,20 +883,33 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
             ev["detections"] = detections
 
             status = ev.get("status", "")
-            if status == "ENHANCEMENT_PROCESSING" or (status == "CAPTURE_REQUESTED" and orig):
-                ev["status"] = "COMPLETE" if (enh or orig) else "FAILED"
-                ev["ai_status"] = "COMPLETE" if enh else "ORIGINAL_PRESERVED"
-                ev["processing_status"] = "COMPLETE" if (enh or orig) else "FAILED"
-            else:
+            ai_status = str(ev.get("ai_status") or "").upper()
+            if status == "ENHANCEMENT_PROCESSING":
                 if enh:
-                    ev["processing_status"] = enh.get("processing_status", "COMPLETE")
-                elif orig:
-                    if status == "ENHANCEMENT_FAILED":
-                        ev["processing_status"] = "FAILED"
-                    else:
-                        ev["processing_status"] = "COMPLETE" if status in ("COMPLETE", "CAPTURED", "RECORDED") else "PENDING"
+                    ev["status"] = "COMPLETE"
+                    ev["ai_status"] = "COMPLETE"
+                    ev["processing_status"] = "COMPLETE"
                 else:
-                    ev["processing_status"] = "NONE"
+                    ev["processing_status"] = "PROCESSING"
+            elif status == "CAPTURE_REQUESTED" and orig:
+                ev["status"] = "COMPLETE"
+                ev["ai_status"] = "COMPLETE" if enh else "ORIGINAL_PRESERVED"
+                ev["processing_status"] = "COMPLETE" if enh else "AVAILABLE"
+            elif enh:
+                ev["processing_status"] = enh.get("processing_status", "COMPLETE")
+            elif orig:
+                if status == "ENHANCEMENT_FAILED" or ai_status == "FAILED":
+                    ev["processing_status"] = "FAILED"
+                elif ai_status == "PROCESSING":
+                    ev["processing_status"] = "PROCESSING"
+                elif ai_status == "ORIGINAL_PRESERVED":
+                    ev["processing_status"] = "AVAILABLE"
+                elif status in ("CAPTURED", "RECORDED") and ai_status == "PENDING":
+                    ev["processing_status"] = "PENDING"
+                else:
+                    ev["processing_status"] = "AVAILABLE"
+            else:
+                ev["processing_status"] = "NONE"
 
             results.append(ev)
         return results
