@@ -8,6 +8,7 @@ from __future__ import annotations
 import concurrent.futures
 import datetime
 import hashlib
+import mimetypes
 import os
 import shutil
 import time
@@ -28,6 +29,7 @@ from backend.database import (
     get_device_status,
     get_event,
     get_signed_storage_url,
+    has_supabase_config,
     init_db,
     list_events,
     list_media_events,
@@ -360,9 +362,19 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
                 except Exception as det_err:
                     print(f"[AI Detection] Notice: Vision detection non-fatal skip ({det_err})")
 
-            # Upload enhanced image to Supabase Storage
-            upload_to_supabase_storage(enhanced_local_path, enhanced_storage_path, content_type="image/jpeg")
-
+            # Only publish an enhanced asset after its cloud upload succeeds.
+            enhanced_uploaded = upload_to_supabase_storage(
+                enhanced_local_path, enhanced_storage_path, content_type="image/jpeg"
+            )
+            if has_supabase_config() and not enhanced_uploaded:
+                update_event_status(
+                    event_id,
+                    status="COMPLETE",
+                    ai_status="ORIGINAL_PRESERVED",
+                    notes="AI enhancement was generated but could not be saved to Supabase Storage; original media is preserved."
+                )
+                print(f"[AI Pipeline] Enhanced image upload failed for {event_id}; preserving original")
+                return
 
             # Record ENHANCED media asset
             record_media_asset({
@@ -386,7 +398,18 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
                 update_event_status(event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED", notes=res.get("error"))
                 return
 
-            upload_to_supabase_storage(enhanced_local_path, enhanced_storage_path, content_type="video/mp4")
+            enhanced_uploaded = upload_to_supabase_storage(
+                enhanced_local_path, enhanced_storage_path, content_type="video/mp4"
+            )
+            if has_supabase_config() and not enhanced_uploaded:
+                update_event_status(
+                    event_id,
+                    status="COMPLETE",
+                    ai_status="ORIGINAL_PRESERVED",
+                    notes="Video enhancement was generated but could not be saved to Supabase Storage; original media is preserved."
+                )
+                print(f"[AI Pipeline] Enhanced video upload failed for {event_id}; preserving original")
+                return
 
             record_media_asset({
                 "id": f"med_{event_id}_enhanced",
@@ -445,35 +468,53 @@ def upload_media():
     storage_folder = "images" if media_type == "IMAGE" else "videos"
     orig_storage_path = f"original/{storage_folder}/{device_id}/{date_str}/{orig_filename}"
 
-    # Upload ORIGINAL to Supabase Storage
-    content_type = "image/jpeg" if media_type == "IMAGE" else "video/mp4"
-    upload_to_supabase_storage(orig_local_path, orig_storage_path, content_type=content_type)
+    # Upload ORIGINAL to Supabase Storage before publishing its database record.
+    default_type = "image/jpeg" if media_type == "IMAGE" else "video/mp4"
+    content_type = mimetypes.guess_type(orig_filename)[0] or default_type
+    original_uploaded = upload_to_supabase_storage(
+        orig_local_path, orig_storage_path, content_type=content_type
+    )
+    if has_supabase_config() and not original_uploaded:
+        print(f"[Media Upload] Original upload to Supabase failed for event {event_id}; not creating a dangling asset record")
+        return jsonify({
+            "error": "Supabase Storage upload failed; original media was not registered.",
+            "event_id": event_id,
+            "retryable": True
+        }), 503
 
-    # 1. Create Event
-    create_event({
-        "event_id": event_id,
-        "device_id": device_id,
-        "type": "MANUAL_CAPTURE" if media_type == "IMAGE" else "VIDEO_RECORDING",
-        "status": "CAPTURED" if media_type == "IMAGE" else "RECORDED",
-        "ai_status": "PENDING",
-        "duration": request.form.get("duration", "0s"),
-        "notes": f"Original media ingested. Size: {file_size / 1024:.1f} KB"
-    })
+    try:
+        # 1. Create Event
+        create_event({
+            "event_id": event_id,
+            "device_id": device_id,
+            "type": "MANUAL_CAPTURE" if media_type == "IMAGE" else "VIDEO_RECORDING",
+            "status": "CAPTURED" if media_type == "IMAGE" else "RECORDED",
+            "ai_status": "PENDING",
+            "duration": request.form.get("duration", "0s"),
+            "notes": f"Original media ingested. Size: {file_size / 1024:.1f} KB"
+        })
 
-    # 2. Record ORIGINAL media asset
-    record_media_asset({
-        "id": f"med_{event_id}_original",
-        "event_id": event_id,
-        "device_id": device_id,
-        "media_type": media_type,
-        "variant": "ORIGINAL",
-        "filename": orig_filename,
-        "storage_path": orig_storage_path,
-        "file_size_bytes": file_size,
-        "resolution": "1280x720",
-        "duration": request.form.get("duration", "0s"),
-        "processing_status": "COMPLETE"
-    })
+        # 2. Record ORIGINAL media asset
+        record_media_asset({
+            "id": f"med_{event_id}_original",
+            "event_id": event_id,
+            "device_id": device_id,
+            "media_type": media_type,
+            "variant": "ORIGINAL",
+            "filename": orig_filename,
+            "storage_path": orig_storage_path,
+            "file_size_bytes": file_size,
+            "resolution": "1280x720",
+            "duration": request.form.get("duration", "0s"),
+            "processing_status": "COMPLETE"
+        })
+    except Exception as exc:
+        print(f"[Media Upload] Metadata persistence failed for {event_id}: {type(exc).__name__}: {exc}")
+        return jsonify({
+            "error": "Supabase metadata persistence failed; retry the upload.",
+            "event_id": event_id,
+            "retryable": True
+        }), 503
 
     # 3. Immediately queue AI enhancement asynchronously
     ENHANCE_EXECUTOR.submit(_process_enhancement_async, event_id, device_id, orig_local_path, media_type, date_str)
