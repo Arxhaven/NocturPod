@@ -5,12 +5,14 @@ import {
   Image as ImageIcon,
   Clock,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Sparkles,
+  Loader2
 } from 'lucide-react';
 import { resolveMediaUrl } from '../services/api';
 import './ImagesScreen.css';
 
-export default function ImagesScreen({ images = [], onSelectImage }) {
+export default function ImagesScreen({ images = [], onSelectImage, onEnhanceMissing, isEnhancingMissing = false }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [failedMedia, setFailedMedia] = useState({});
 
@@ -42,7 +44,19 @@ export default function ImagesScreen({ images = [], onSelectImage }) {
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
+        <button
+          type="button"
+          className="legacy-enhance-action mono"
+          onClick={onEnhanceMissing}
+          disabled={isEnhancingMissing}
+          title="Queue AI enhancement for older images and videos that have no enhanced version"
+        >
+          {isEnhancingMissing ? <Loader2 size={14} className="legacy-enhance-spinner" /> : <Sparkles size={14} />}
+          <span>{isEnhancingMissing ? 'QUEUING...' : 'ENHANCE ALL LEGACY MEDIA'}</span>
+        </button>
       </div>
+
+      <p className="legacy-enhance-note mono">Creates missing enhanced versions for older captures and recordings. Original files are kept unchanged; processing continues in the background.</p>
 
       {/* Grid of captures */}
       {filtered.length === 0 ? (
