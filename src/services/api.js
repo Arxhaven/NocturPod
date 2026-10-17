@@ -197,6 +197,23 @@ export async function fetchFootage() {
 }
 
 /**
+ * Queue AI enhancement for historical captures that have an ORIGINAL asset but no ENHANCED asset.
+ * The backend preserves the original and processes legacy media asynchronously.
+ */
+export async function enqueueMissingEnhancements(mediaType = 'ALL') {
+  const res = await fetchWithTimeout(buildApiUrl('/api/media/enhance-missing'), {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ media_type: mediaType }),
+  }, 20000);
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`AI backfill error (${res.status}): ${errText || res.statusText}`);
+  }
+  return await res.json();
+}
+
+/**
  * Fetches the current hardware lighting mode from backend (Mode A: WHITE, Mode B: NIGHT).
  */
 export async function fetchLightMode() {

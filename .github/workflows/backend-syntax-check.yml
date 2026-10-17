@@ -1,0 +1,27 @@
+name: Backend Python syntax check
+
+on:
+  pull_request:
+    paths:
+      - "backend/**/*.py"
+      - "agent/**/*.py"
+      - ".github/workflows/backend-syntax-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/**/*.py"
+      - "agent/**/*.py"
+      - ".github/workflows/backend-syntax-check.yml"
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile backend and edge agent
+        run: python -m compileall -q backend agent

@@ -6,6 +6,7 @@ local bounded spooling, and media uploads.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import threading
 import time
@@ -29,6 +30,7 @@ from agent.config import (
 )
 from agent.heartbeat import collect_device_telemetry
 from agent.lighting import LightingController
+from agent.pir_sensor import PIRSensor
 from agent.stream import StreamManager
 from agent.uploader import SpoolUploader
 
@@ -48,6 +50,32 @@ class NocturPodAgent:
         self.capture_ctrl = CaptureController(self.camera, self.api_client, self.spool)
         self.record_ctrl = RecordController(self.camera, self.api_client, self.spool)
         self.streamer = StreamManager(self.camera, self.api_client)
+        self.motion_event = threading.Event()
+        self.motion_capture_cooldown = max(1.0, float(os.getenv("NOCTURPOD_MOTION_COOLDOWN", "10")))
+        self.last_motion_capture_at = 0.0
+        self.pir_sensor = PIRSensor(on_motion=self._signal_motion)
+        if self.pir_sensor.is_hardware_available:
+            print("[PIR] Motion-triggered still capture enabled on BCM GPIO 17.")
+        else:
+            print("[PIR] Sensor unavailable; manual captures and recording remain available.")
+
+    def _signal_motion(self) -> None:
+        """GPIO callback only signals the main loop; it does not read the camera concurrently."""
+        self.motion_event.set()
+
+    def _handle_motion_capture(self) -> None:
+        self.motion_event.clear()
+        now = time.monotonic()
+        if now - self.last_motion_capture_at < self.motion_capture_cooldown:
+            print("[PIR] Motion event ignored during capture cooldown.")
+            return
+
+        self.last_motion_capture_at = now
+        ok, event_id, error = self.capture_ctrl.capture_image()
+        if ok:
+            print(f"[PIR] Motion capture created: {event_id}. Backend will generate the enhanced variant.")
+        else:
+            print(f"[PIR] Motion capture failed: {error}")
 
     def heartbeat_worker(self) -> None:
         """Send telemetry on its own schedule; never wait for media uploads."""
@@ -135,6 +163,11 @@ class NocturPodAgent:
         print("[NocturPod Agent] Edge daemon running. Streaming real camera frames...")
         try:
             while self.is_running:
+                # Handle PIR events in the main loop so sensor callbacks never compete
+                # with the streaming/recording code for a camera frame.
+                if self.motion_event.is_set():
+                    self._handle_motion_capture()
+
                 # Active video recording step
                 if self.record_ctrl.is_recording:
                     self.record_ctrl.record_step()
@@ -146,6 +179,7 @@ class NocturPodAgent:
             print("\n[NocturPod Agent] Interrupted. Shutting down gracefully...")
         finally:
             self.is_running = False
+            self.pir_sensor.close()
             self.lighting.close()
             self.camera.release()
 

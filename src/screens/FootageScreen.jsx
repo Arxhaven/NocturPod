@@ -4,11 +4,13 @@ import {
   Film, 
   Search, 
   Clock, 
-  CheckCircle2
+  CheckCircle2,
+  Sparkles,
+  Loader2
 } from 'lucide-react';
 import './FootageScreen.css';
 
-export default function FootageScreen({ footageList = [], onSelectVideo }) {
+export default function FootageScreen({ footageList = [], onSelectVideo, onEnhanceMissing, isEnhancingMissing = false }) {
   const [searchQuery, setSearchQuery] = useState('');
 
   const filtered = footageList.filter((item) => {
@@ -39,7 +41,19 @@ export default function FootageScreen({ footageList = [], onSelectVideo }) {
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
+        <button
+          type="button"
+          className="legacy-enhance-action mono"
+          onClick={onEnhanceMissing}
+          disabled={isEnhancingMissing}
+          title="Queue AI enhancement for older images and videos that have no enhanced version"
+        >
+          {isEnhancingMissing ? <Loader2 size={14} className="legacy-enhance-spinner" /> : <Sparkles size={14} />}
+          <span>{isEnhancingMissing ? 'QUEUING...' : 'ENHANCE ALL LEGACY MEDIA'}</span>
+        </button>
       </div>
+
+      <p className="legacy-enhance-note mono">Creates missing enhanced versions for older captures and recordings. Original files are kept unchanged; processing continues in the background.</p>
 
       {/* Grid of recorded clips */}
       {filtered.length === 0 ? (
