@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import datetime
+import hashlib
 import os
 import shutil
 import time
@@ -68,6 +69,13 @@ CORS(
 
 # Device authorization token from environment
 DEVICE_AUTH_TOKEN = os.getenv("NOCTURPOD_DEVICE_TOKEN", "nocturpod-sec-key-replace-with-secure-token")
+_AUTH_TOKEN_FINGERPRINT = hashlib.sha256(DEVICE_AUTH_TOKEN.encode("utf-8")).hexdigest()[:12]
+print(
+    "[Auth] Device-token diagnostic: "
+    f"configured_env={'yes' if os.getenv('NOCTURPOD_DEVICE_TOKEN') else 'no (using default)'}, "
+    f"length={len(DEVICE_AUTH_TOKEN)}, "
+    f"fingerprint={_AUTH_TOKEN_FINGERPRINT}"
+)
 
 # Thread pool for asynchronous AI enhancement jobs
 ENHANCE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=3)
