@@ -9,6 +9,7 @@
  */
 
 :root {
+  color-scheme: dark;
   --color-primary-dark: #051F20;
   --color-deep-green: #0B2B26;
   --color-dark-emerald: #163832;
@@ -126,6 +127,26 @@ h1, h2, h3, h4, h5, h6 {
 button, input, select, textarea {
   font-family: inherit;
   color: inherit;
+  color-scheme: dark;
+}
+
+/* Keep browser-native controls consistent with the dark NocturPod shell. */
+input:not([type="checkbox"]):not([type="radio"]),
+select,
+textarea,
+option {
+  background-color: rgba(5, 31, 32, 0.96);
+  color: var(--color-light-green);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: rgba(142, 182, 155, 0.62);
+}
+
+::selection {
+  background: rgba(142, 182, 155, 0.30);
+  color: var(--color-light-green);
 }
 
 button {

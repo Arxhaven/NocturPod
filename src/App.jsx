@@ -27,15 +27,40 @@ import {
 } from './services/api';
 import './App.css';
 
+const MEDIA_CACHE_KEY = 'nocturpod-media-cache-v1';
+
+function readCachedMedia(key) {
+  if (typeof window === 'undefined') return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(MEDIA_CACHE_KEY) || '{}');
+    return Array.isArray(parsed[key]) ? parsed[key] : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeCachedMedia(key, value) {
+  if (!Array.isArray(value) || typeof window === 'undefined') return;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(MEDIA_CACHE_KEY) || '{}');
+    parsed[key] = value;
+    parsed.updatedAt = new Date().toISOString();
+    window.localStorage.setItem(MEDIA_CACHE_KEY, JSON.stringify(parsed));
+  } catch (error) {
+    // Cache is only a resilience aid; storage quota/privacy settings must not break the dashboard.
+    console.warn('Could not update local media cache:', error);
+  }
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [deviceStatus, setDeviceStatus] = useState(EMPTY_DEVICE_STATUS);
   const [backendOnline, setBackendOnline] = useState(false);
   
-  const [events, setEvents] = useState([]);
-  const [footage, setFootage] = useState([]);
-  const [images, setImages] = useState([]);
+  const [events, setEvents] = useState(() => readCachedMedia('events'));
+  const [footage, setFootage] = useState(() => readCachedMedia('footage'));
+  const [images, setImages] = useState(() => readCachedMedia('images'));
 
   const [selectedImage, setSelectedImage] = useState(null);
   const [selectedVideo, setSelectedVideo] = useState(null);
@@ -59,9 +84,20 @@ export default function App() {
         fetchImages(),
         fetchFootage()
       ]);
-      if (evts) setEvents(evts);
-      if (imgs) setImages(imgs);
-      if (foot) setFootage(foot);
+      // Only replace persisted UI data when a request completed successfully.
+      // A backend outage is not the same thing as an empty Supabase table.
+      if (Array.isArray(evts)) {
+        setEvents(evts);
+        writeCachedMedia('events', evts);
+      }
+      if (Array.isArray(imgs)) {
+        setImages(imgs);
+        writeCachedMedia('images', imgs);
+      }
+      if (Array.isArray(foot)) {
+        setFootage(foot);
+        writeCachedMedia('footage', foot);
+      }
     } catch (err) {
       console.warn("Media sync notice:", err);
     }

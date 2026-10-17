@@ -8,7 +8,7 @@
   pointer-events: none;
   z-index: 0;
   overflow: hidden;
-  background: radial-gradient(circle at 18% 18%, #163832 0%, #0B2B26 45%, #051F20 95%);
+  background: radial-gradient(circle at 18% 18%, #0b2419 0%, #06120f 45%, #030807 95%);
 }
 
 .animated-bg-orb {
@@ -23,7 +23,7 @@
 .orb-1 {
   width: 650px;
   height: 650px;
-  background: #235347;
+  background: #2c815c;
   top: -120px;
   left: -80px;
   animation-duration: 28s;
@@ -32,7 +32,7 @@
 .orb-2 {
   width: 520px;
   height: 520px;
-  background: #8EB69B;
+  background: #4f9b74;
   bottom: -100px;
   right: 5%;
   animation-duration: 34s;
@@ -43,7 +43,7 @@
 .orb-3 {
   width: 420px;
   height: 420px;
-  background: #163832;
+  background: #174e3a;
   top: 40%;
   left: 30%;
   animation-duration: 24s;
