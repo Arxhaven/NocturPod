@@ -11,6 +11,8 @@ import hashlib
 import mimetypes
 import os
 import shutil
+import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Any, Generator
@@ -29,6 +31,9 @@ from backend.database import (
     get_device_status,
     get_event,
     get_signed_storage_url,
+    get_media_assets_for_event,
+    list_all_media_assets,
+    download_from_supabase_storage,
     has_supabase_config,
     init_db,
     list_events,
@@ -96,6 +101,32 @@ print(
 
 # Thread pool for asynchronous AI enhancement jobs
 ENHANCE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+_ENHANCEMENT_LOCK = threading.RLock()
+_ENHANCEMENT_IN_FLIGHT: set[str] = set()
+
+
+def _run_tracked_enhancement(event_id: str, worker: Any, *args: Any) -> None:
+    """Run one enhancement and release its in-flight guard even after failure."""
+    try:
+        worker(*args)
+    finally:
+        with _ENHANCEMENT_LOCK:
+            _ENHANCEMENT_IN_FLIGHT.discard(event_id)
+
+
+def _schedule_enhancement(event_id: str, worker: Any, *args: Any) -> bool:
+    """Avoid scheduling duplicate enhancement jobs for the same event in one worker."""
+    with _ENHANCEMENT_LOCK:
+        if event_id in _ENHANCEMENT_IN_FLIGHT:
+            return False
+        _ENHANCEMENT_IN_FLIGHT.add(event_id)
+    try:
+        ENHANCE_EXECUTOR.submit(_run_tracked_enhancement, event_id, worker, *args)
+        return True
+    except Exception:
+        with _ENHANCEMENT_LOCK:
+            _ENHANCEMENT_IN_FLIGHT.discard(event_id)
+        raise
 
 
 # --------------------------------------------------------------------------
@@ -440,6 +471,119 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
         update_event_status(event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED", notes=str(ex))
 
 
+
+def _process_existing_media_async(event_id: str) -> None:
+    """Backfill an old ORIGINAL asset from private Storage, then use the same pipeline as new uploads."""
+    try:
+        assets = get_media_assets_for_event(event_id)
+        enhanced = next((a for a in assets if str(a.get("variant", "")).upper() == "ENHANCED"), None)
+        if enhanced and enhanced.get("storage_path"):
+            log_system_event("INFO", "AI_ENGINE", f"Skipped backfill for {event_id}: enhanced asset already exists")
+            return
+
+        original = next((a for a in assets if str(a.get("variant", "")).upper() == "ORIGINAL"), None)
+        if not original:
+            update_event_status(
+                event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED",
+                notes="Cannot backfill AI enhancement because no ORIGINAL media asset is registered."
+            )
+            return
+
+        storage_path = str(original.get("storage_path") or "")
+        filename = Path(str(original.get("filename") or storage_path)).name
+        ext = Path(filename).suffix.lower()
+        media_type = str(original.get("media_type") or "").upper()
+        if media_type not in ("IMAGE", "VIDEO"):
+            media_type = "VIDEO" if ext in (".mp4", ".mkv", ".avi", ".mov", ".webm") else "IMAGE"
+        if not ext:
+            ext = ".mp4" if media_type == "VIDEO" else ".jpg"
+
+        device_id = str(original.get("device_id") or "nocturpod-edge-01")
+        with tempfile.TemporaryDirectory(prefix=f"nocturpod-backfill-{event_id}-") as tmp:
+            source_path = Path(tmp) / f"{event_id}_original{ext}"
+            downloaded = False
+            if storage_path and has_supabase_config():
+                downloaded = download_from_supabase_storage(storage_path, source_path)
+            if not downloaded:
+                local_candidate = MEDIA_DIR / filename
+                if local_candidate.is_file():
+                    shutil.copy2(local_candidate, source_path)
+                    downloaded = source_path.is_file() and source_path.stat().st_size > 0
+
+            if not downloaded:
+                update_event_status(
+                    event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED",
+                    notes="Original media metadata exists, but its file could not be downloaded from Storage or found locally. Original record was preserved."
+                )
+                log_system_event("WARNING", "AI_ENGINE", f"Legacy media unavailable for backfill: {event_id}")
+                return
+
+            parts = storage_path.split("/")
+            date_str = parts[3] if len(parts) >= 5 and parts[0] == "original" else datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+            if len(date_str) != 10 or date_str[4:5] != "-" or date_str[7:8] != "-":
+                date_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+
+            _process_enhancement_async(event_id, device_id, source_path, media_type, date_str)
+
+    except Exception as exc:
+        print(f"[AI Backfill] Failed for {event_id}: {type(exc).__name__}: {exc}")
+        update_event_status(
+            event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED",
+            notes=f"Legacy enhancement backfill failed: {type(exc).__name__}"
+        )
+
+
+@app.post("/api/media/enhance-missing")
+def enqueue_missing_media_enhancements():
+    """Queue AI enhancement for every registered ORIGINAL with no ENHANCED asset."""
+    payload = request.get_json(silent=True) or {}
+    requested_type = str(payload.get("media_type") or "ALL").strip().upper()
+    if requested_type not in ("ALL", "IMAGE", "VIDEO"):
+        return jsonify({"error": "media_type must be ALL, IMAGE or VIDEO"}), 400
+
+    assets = list_all_media_assets()
+    originals = [a for a in assets if str(a.get("variant", "")).upper() == "ORIGINAL"]
+    enhanced_ids = {
+        str(a.get("event_id")) for a in assets
+        if str(a.get("variant", "")).upper() == "ENHANCED" and a.get("event_id")
+    }
+
+    queued = 0
+    skipped_enhanced = 0
+    skipped_in_flight = 0
+    skipped_invalid = 0
+    for asset in originals:
+        event_id = str(asset.get("event_id") or "")
+        media_type = str(asset.get("media_type") or "").upper()
+        if requested_type != "ALL" and media_type != requested_type:
+            continue
+        if not event_id or not asset.get("storage_path"):
+            skipped_invalid += 1
+            continue
+        if event_id in enhanced_ids:
+            skipped_enhanced += 1
+            continue
+        if _schedule_enhancement(event_id, _process_existing_media_async, event_id):
+            queued += 1
+        else:
+            skipped_in_flight += 1
+
+    log_system_event(
+        "INFO", "AI_ENGINE",
+        f"Legacy enhancement backfill queued={queued}, already_enhanced={skipped_enhanced}, "
+        f"in_flight={skipped_in_flight}, invalid={skipped_invalid}, type={requested_type}"
+    )
+    return jsonify({
+        "status": "QUEUED",
+        "media_type": requested_type,
+        "queued": queued,
+        "already_enhanced": skipped_enhanced,
+        "already_processing": skipped_in_flight,
+        "skipped_missing_metadata": skipped_invalid,
+        "message": "Original assets are preserved. Enhancement jobs are queued in the background."
+    }), 202
+
+
 # --------------------------------------------------------------------------
 # Media Ingestion & Upload Route
 # --------------------------------------------------------------------------
@@ -524,7 +668,7 @@ def upload_media():
         }), 503
 
     # 3. Immediately queue AI enhancement asynchronously
-    ENHANCE_EXECUTOR.submit(_process_enhancement_async, event_id, device_id, orig_local_path, media_type, date_str)
+    _schedule_enhancement(event_id, _process_enhancement_async, event_id, device_id, orig_local_path, media_type, date_str)
 
     return jsonify({
         "status": "ACCEPTED",
