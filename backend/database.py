@@ -630,6 +630,8 @@ def get_event(event_id: str) -> dict[str, Any] | None:
     orig = next((a for a in assets if a.get("variant") == "ORIGINAL"), None)
     enh = next((a for a in assets if a.get("variant") == "ENHANCED"), None)
 
+    ev["original_storage_path"] = orig.get("storage_path") if orig else None
+    ev["enhanced_storage_path"] = enh.get("storage_path") if enh else None
     ev["original_url"] = get_signed_storage_url(orig["storage_path"]) if orig else None
     ev["enhanced_url"] = get_signed_storage_url(enh["storage_path"]) if enh else None
     ev["media_type"] = ev.get("type") == "VIDEO_RECORDING" and "VIDEO" or "IMAGE"
@@ -717,6 +719,8 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
             orig = next((a for a in assets if a.get("variant") == "ORIGINAL"), None)
             enh = next((a for a in assets if a.get("variant") == "ENHANCED"), None)
 
+            ev["original_storage_path"] = orig.get("storage_path") if orig else None
+            ev["enhanced_storage_path"] = enh.get("storage_path") if enh else None
             ev["original_url"] = get_signed_storage_url(orig["storage_path"]) if orig else None
             ev["enhanced_url"] = get_signed_storage_url(enh["storage_path"]) if enh else None
             ev["media_type"] = "VIDEO" if ev.get("type") == "VIDEO_RECORDING" else "IMAGE"
@@ -804,6 +808,8 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
             orig = next((a for a in assets if a.get("variant") == "ORIGINAL"), None)
             enh = next((a for a in assets if a.get("variant") == "ENHANCED"), None)
 
+            ev["original_storage_path"] = orig.get("storage_path") if orig else None
+            ev["enhanced_storage_path"] = enh.get("storage_path") if enh else None
             ev["original_url"] = get_signed_storage_url(orig["storage_path"]) if orig else None
             ev["enhanced_url"] = get_signed_storage_url(enh["storage_path"]) if enh else None
             ev["media_type"] = "VIDEO" if ev.get("type") == "VIDEO_RECORDING" else "IMAGE"
