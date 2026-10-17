@@ -162,3 +162,48 @@
   color: var(--color-muted-sage);
   opacity: 0.8;
 }
+
+.legacy-enhance-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 9px 12px;
+  border-radius: 7px;
+  border: 1px solid rgba(104, 225, 157, 0.45);
+  background: linear-gradient(135deg, rgba(30, 115, 75, 0.28), rgba(17, 55, 45, 0.35));
+  color: var(--color-light-green);
+  font-size: 10px;
+  letter-spacing: 0.035em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
+}
+
+.legacy-enhance-action:hover:not(:disabled) {
+  border-color: var(--color-light-green);
+  background: rgba(40, 133, 86, 0.30);
+  transform: translateY(-1px);
+}
+
+.legacy-enhance-action:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.legacy-enhance-spinner {
+  animation: legacyEnhanceSpin 1s linear infinite;
+}
+
+.legacy-enhance-note {
+  margin: -5px 2px 0;
+  color: var(--color-muted-sage);
+  font-size: 10px;
+  line-height: 1.6;
+  opacity: 0.85;
+}
+
+@keyframes legacyEnhanceSpin {
+  to { transform: rotate(360deg); }
+}
