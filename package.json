@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node scripts/decode-startup-video.mjs && vite build",
     "preview": "vite preview",
-    "test": "node --test test/**/*.test.js"
+    "test": "node --test test/**/*.test.js",
+    "predev": "node scripts/decode-startup-video.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",
