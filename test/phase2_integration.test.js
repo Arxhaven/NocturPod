@@ -15,13 +15,13 @@ import {
 } from '../src/utils/manualCapture.js';
 import { evaluateDeviceStatus, INITIAL_DISCONNECTED_STATUS } from '../src/utils/deviceStatus.js';
 
-test('Production API Base URL: Points to Render backend by default', () => {
+test('Production API Base URL: Points to Railway backend by default', () => {
   assert.strictEqual(
     DEFAULT_PRODUCTION_API_URL,
-    'https://nocturpod-njsi.onrender.com',
-    'Default production URL must point to deployed Render backend'
+    'https://nocturpod-production.up.railway.app',
+    'Default production URL must point to deployed Railway backend'
   );
-  assert.ok(API_BASE.includes('onrender.com') || API_BASE.startsWith('/api') || API_BASE.startsWith('http'), `Valid API base: ${API_BASE}`);
+  assert.ok(API_BASE.includes('railway.app') || API_BASE.startsWith('/api') || API_BASE.startsWith('http'), `Valid API base: ${API_BASE}`);
 });
 
 test('API URL Construction: Normalizes trailing slashes and prevents /api/api double prefixing', () => {
@@ -41,7 +41,7 @@ test('Production Stream URL: Resolves stream path correctly without duplicate sl
   assert.ok(!liveUrl.includes('/api/api/'), `URL must not contain /api/api: ${liveUrl}`);
 });
 
-test('Recording Capability: Reports true for Render production backend supporting /api/device/commands/record', () => {
+test('Recording Capability: Reports true for Railway production backend supporting /api/device/commands/record', () => {
   assert.strictEqual(
     isRecordingSupported(),
     true,
@@ -167,8 +167,8 @@ test('Media Schema Mapping: Maps Render media record (NP_20261014_165402_727) co
   assert.ok(mapped.url.includes('token=sampletoken123'));
 });
 
-test('Device Status Evaluation: Correctly parses snake_case telemetry from Render /api/device/status', () => {
-  const mockRenderDeviceStatus = {
+test('Device Status Evaluation: Correctly parses snake_case telemetry from Railway /api/device/status', () => {
+  const mockRailwayDeviceStatus = {
     ai_model_version: 'Adaptive CLAHE + YOLOv8n',
     camera_model: 'OV5647 IR-Cut',
     camera_status: 'OFFLINE',
@@ -191,7 +191,7 @@ test('Device Status Evaluation: Correctly parses snake_case telemetry from Rende
     wifi_status: 'CONNECTED'
   };
 
-  const evaluated = evaluateDeviceStatus({ connected: true }, mockRenderDeviceStatus);
+  const evaluated = evaluateDeviceStatus({ connected: true }, mockRailwayDeviceStatus);
 
   assert.strictEqual(evaluated.status, 'OFFLINE');
   assert.strictEqual(evaluated.hardware, 'Raspberry Pi 4 Model B 8GB');
