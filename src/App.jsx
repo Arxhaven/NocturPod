@@ -164,12 +164,40 @@ export default function App() {
     };
   }, [refreshMedia, isRecording]);
 
-  // Refresh media when switching to media/events tabs
+  // Refresh media when opening these tabs and keep enhancement status current
+  // while the user is viewing a gallery or the event timeline.
   useEffect(() => {
-    if (activeTab === 'images' || activeTab === 'footage' || activeTab === 'events') {
-      refreshMedia();
+    if (activeTab !== 'images' && activeTab !== 'footage' && activeTab !== 'events') {
+      return undefined;
     }
+
+    refreshMedia();
+    const mediaInterval = setInterval(() => {
+      refreshMedia();
+    }, 15000);
+
+    return () => clearInterval(mediaInterval);
   }, [activeTab, refreshMedia]);
+
+  // Keep an open media viewer synchronized with refreshed records, so its
+  // AI ENHANCED toggle becomes available as soon as backfill finishes.
+  useEffect(() => {
+    if (!selectedImage) return;
+    const selectedId = selectedImage.event_id || selectedImage.id;
+    const latestImage = images.find((item) => (item.event_id || item.id) === selectedId);
+    if (latestImage && latestImage !== selectedImage) {
+      setSelectedImage(latestImage);
+    }
+  }, [images, selectedImage]);
+
+  useEffect(() => {
+    if (!selectedVideo) return;
+    const selectedId = selectedVideo.event_id || selectedVideo.id;
+    const latestVideo = footage.find((item) => (item.event_id || item.id) === selectedId);
+    if (latestVideo && latestVideo !== selectedVideo) {
+      setSelectedVideo(latestVideo);
+    }
+  }, [footage, selectedVideo]);
 
   // Genuine Edge Snapshot Capture flow
   const handleQuickCapture = async () => {
