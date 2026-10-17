@@ -58,9 +58,10 @@ class SpoolUploader:
         with self._lock:
             if not self.queue:
                 return 0
+            # Keep the persisted queue intact during network I/O. If the process
+            # restarts mid-upload, pending items must remain eligible for retry.
             pending = list(self.queue)
-            self.queue = []
-            self._save_manifest()
+            pending_ids = {id(item) for item in pending}
 
         remaining: list[dict[str, Any]] = []
         uploaded_count = 0
@@ -83,8 +84,10 @@ class SpoolUploader:
             else:
                 remaining.append(item)
 
-        # Preserve FIFO order: older failed entries stay ahead of new enqueues.
+        # Remove only the items from this snapshot; keep any items enqueued while
+        # uploads were running. Older failed entries remain ahead of new enqueues.
         with self._lock:
-            self.queue = remaining + self.queue
+            newly_enqueued = [item for item in self.queue if id(item) not in pending_ids]
+            self.queue = remaining + newly_enqueued
             self._save_manifest()
         return uploaded_count
