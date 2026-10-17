@@ -15,7 +15,7 @@ from typing import Any, Generator
 
 import cv2
 import numpy as np
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, redirect, request, send_from_directory
 from flask_cors import CORS
 
 from backend.ai_engine import ENGINE, enhance_image, enhance_video
@@ -517,8 +517,46 @@ def get_footage():
 
 @app.get("/api/media/file/<path:filepath>")
 def serve_local_media_fallback(filepath: str):
+    """Resolve legacy relative media URLs through Supabase before using local storage.
+
+    Older API responses can contain /api/media/file/<storage_path> when signing a
+    Supabase URL temporarily failed. Re-sign on demand so media survives Railway
+    restarts even when the backend's ephemeral local copy is no longer available.
+    """
+    if not filepath or "\\" in filepath:
+        return jsonify({"error": "Invalid media path"}), 400
+
+    path_parts = filepath.split("/")
+    if any(part in ("", ".", "..") for part in path_parts):
+        return jsonify({"error": "Invalid media path"}), 400
+
+    allowed_prefixes = (
+        "original/images/",
+        "original/videos/",
+        "enhanced/images/",
+        "enhanced/videos/",
+    )
+    if not filepath.startswith(allowed_prefixes):
+        return jsonify({"error": "Unsupported media path"}), 404
+
+    # A successful result is a freshly signed Supabase URL. Redirecting the client
+    # keeps image/video delivery out of the Flask worker and supports byte-range
+    # requests directly against Supabase Storage.
+    signed_url = get_signed_storage_url(filepath)
+    if signed_url and signed_url.startswith(("https://", "http://")):
+        return redirect(signed_url, code=302)
+
+    # Preserve the local fallback for development or a file uploaded in this
+    # running instance. Never assume Railway's local disk contains older assets.
     filename = Path(filepath).name
-    return send_from_directory(str(MEDIA_DIR), filename)
+    local_path = MEDIA_DIR / filename
+    if local_path.is_file():
+        return send_from_directory(str(MEDIA_DIR), filename)
+
+    return jsonify({
+        "error": "Media is not available from Supabase and no local copy exists",
+        "storage_path": filepath,
+    }), 404
 
 
 @app.get("/api/ai/status")
