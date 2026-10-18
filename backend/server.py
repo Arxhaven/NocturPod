@@ -229,17 +229,94 @@ def get_light_mode_endpoint():
     })
 
 
+@app.post("/api/device/camera/settings")
+def set_camera_settings_endpoint():
+    """Queue camera controls for application by the physical Raspberry Pi agent."""
+    data = request.get_json(silent=True) or {}
+    try:
+        settings = {
+            "auto_exposure": bool(data.get("auto_exposure", True)),
+            "exposure_time_us": max(1000, min(60000, int(data.get("exposure_time_us", 20000)))),
+            "analogue_gain": max(1.0, min(8.0, float(data.get("analogue_gain", 3.0)))),
+            "auto_white_balance": bool(data.get("auto_white_balance", True)),
+            "brightness": max(-1.0, min(1.0, float(data.get("brightness", 0.0)))),
+            "contrast": max(0.5, min(2.0, float(data.get("contrast", 1.0)))),
+            "saturation": max(0.0, min(2.0, float(data.get("saturation", 0.65)))),
+            "sharpness": max(0.0, min(2.0, float(data.get("sharpness", 1.0)))),
+        }
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "Invalid camera setting values."}), 400
+
+    cmd = queue_command("nocturpod-edge-01", "SET_CAMERA_SETTINGS", settings)
+    log_system_event("INFO", "DASHBOARD", "Camera controls queued for edge application")
+    return jsonify({
+        "success": True,
+        "status": "QUEUED",
+        "command_id": cmd.get("command_id"),
+        "settings": settings,
+        "note": "The Pi agent must be online and the active camera driver must support the requested controls."
+    }), 202
+
+
+@app.post("/api/device/pir/settings")
+def set_pir_settings_endpoint():
+    """Queue PIR enable/cooldown settings; physical GPIO setup is confirmed by the agent."""
+    data = request.get_json(silent=True) or {}
+    enabled = data.get("enabled", True)
+    if not isinstance(enabled, bool):
+        return jsonify({"success": False, "error": "'enabled' must be true or false."}), 400
+    try:
+        cooldown_seconds = max(5, min(300, int(data.get("cooldown_seconds", 15))))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "cooldown_seconds must be an integer from 5 to 300."}), 400
+
+    payload = {"enabled": enabled, "cooldown_seconds": cooldown_seconds}
+    cmd = queue_command("nocturpod-edge-01", "SET_PIR_SETTINGS", payload)
+    log_system_event("INFO", "DASHBOARD", f"PIR settings queued: enabled={enabled}, cooldown={cooldown_seconds}s")
+    return jsonify({
+        "success": True,
+        "status": "QUEUED",
+        "command_id": cmd.get("command_id"),
+        "settings": payload,
+        "note": "The Pi must be online; enabling PIR fails explicitly if GPIO hardware is unavailable."
+    }), 202
+
+
+@app.post("/api/device/light/intensity")
+def set_light_intensity_endpoint():
+    """Queue illumination intensity for a PWM-compatible LED driver."""
+    data = request.get_json(silent=True) or {}
+    mode = str(data.get("mode", "NIGHT")).strip().upper()
+    if mode not in ("WHITE", "NIGHT"):
+        return jsonify({"success": False, "error": "Intensity mode must be WHITE or NIGHT."}), 400
+    try:
+        intensity_pct = max(0, min(100, int(data.get("intensity_pct", 100))))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "intensity_pct must be from 0 to 100."}), 400
+
+    payload = {"mode": mode, "intensity_pct": intensity_pct}
+    cmd = queue_command("nocturpod-edge-01", "SET_LIGHT_INTENSITY", payload)
+    log_system_event("INFO", "DASHBOARD", f"{mode} light intensity queued: {intensity_pct}%")
+    return jsonify({
+        "success": True,
+        "status": "QUEUED",
+        "command_id": cmd.get("command_id"),
+        "settings": payload,
+        "note": "Physical dimming requires a PWM-compatible LED driver and LIGHT_PWM_ENABLED=1 on the Pi."
+    }), 202
+
+
 @app.post("/api/device/light/mode")
 def set_light_mode_endpoint():
     data = request.get_json(silent=True) or {}
     raw_mode = (data.get("mode") or "").strip().upper()
-    if raw_mode not in ("WHITE", "NIGHT"):
+    if raw_mode not in ("WHITE", "NIGHT", "AUTO"):
         if raw_mode in ("NORMAL", "WHITE_LIGHT", "DAY"):
             raw_mode = "WHITE"
         elif raw_mode in ("LOW_LIGHT", "IR", "NIGHT_MODE", "DARK"):
             raw_mode = "NIGHT"
         else:
-            return jsonify({"success": False, "error": f"Invalid mode '{raw_mode}'. Must be WHITE or NIGHT."}), 400
+            return jsonify({"success": False, "error": f"Invalid mode '{raw_mode}'. Must be WHITE, NIGHT, or AUTO."}), 400
 
     cmd = queue_command("nocturpod-edge-01", "SET_LIGHT_MODE", {"mode": raw_mode})
     log_system_event("INFO", "DASHBOARD", f"Lighting mode switch queued: {raw_mode}")
@@ -460,8 +537,9 @@ def upload_media():
 
     event_id = request.form.get("event_id") or generate_event_id()
     device_id = request.form.get("device_id") or "nocturpod-edge-01"
-    media_type = request.form.get("media_type")
-    
+    media_type = (request.form.get("media_type") or "").upper()
+    capture_source = (request.form.get("capture_source") or "MANUAL").upper()
+
     ext = Path(uploaded.filename).suffix.lower()
     if not media_type:
         media_type = "VIDEO" if ext in (".mp4", ".mkv", ".avi", ".mov") else "IMAGE"
@@ -497,11 +575,11 @@ def upload_media():
         create_event({
             "event_id": event_id,
             "device_id": device_id,
-            "type": "MANUAL_CAPTURE" if media_type == "IMAGE" else "VIDEO_RECORDING",
+            "type": ("MOTION_CAPTURE" if capture_source == "MOTION" else "MANUAL_CAPTURE") if media_type == "IMAGE" else "VIDEO_RECORDING",
             "status": "CAPTURED" if media_type == "IMAGE" else "RECORDED",
             "ai_status": "PENDING",
             "duration": request.form.get("duration", "0s"),
-            "notes": f"Original media ingested. Size: {file_size / 1024:.1f} KB"
+            "notes": f"{'PIR motion-triggered capture' if capture_source == 'MOTION' else 'Original media ingested'}. Size: {file_size / 1024:.1f} KB"
         })
 
         # 2. Record ORIGINAL media asset
@@ -636,7 +714,7 @@ def _queue_missing_media_backfill(base_url: str) -> dict[str, Any]:
             for event in events:
                 event_id = event.get("event_id")
                 event_type = event.get("type")
-                if not event_id or event_type not in ("MANUAL_CAPTURE", "VIDEO_RECORDING"):
+                if not event_id or event_type not in ("MANUAL_CAPTURE", "MOTION_CAPTURE", "VIDEO_RECORDING"):
                     continue
 
                 status = str(event.get("status") or "").upper()
