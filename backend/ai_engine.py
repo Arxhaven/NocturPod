@@ -163,7 +163,7 @@ def _compare_visibility(original: np.ndarray, enhanced: np.ndarray) -> dict[str,
         "before": before,
         "after": after,
         "relative_change_pct": relative_change,
-        "enhancement_mode": "IR_CAST_GRAYSCALE_AND_CLAHE" if ir_cast_detected else "NOISE_AWARE_CLAHE",
+        "enhancement_mode": "IR_CAST_GRAYSCALE_CLAHE_V2" if ir_cast_detected else "NOISE_AWARE_CLAHE_V2",
         "ir_color_cast_detected": ir_cast_detected,
         "ir_color_cast_normalized": ir_cast_detected,
         "explanation": (
