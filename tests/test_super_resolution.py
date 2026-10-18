@@ -67,6 +67,37 @@ class TestNocturPodSuperResolution(unittest.TestCase):
                 sr._get_session()
             download_model.assert_called_once_with(path)
 
+    def test_model_self_test_runs_real_tile_inference(self):
+        with (
+            patch.object(sr, "_get_session", return_value=(FakeX4Session(), "test-model")),
+            patch.object(sr, "_model_path", return_value=(Path("/tmp/fake-model.onnx"), False)),
+        ):
+            result = sr.diagnose_super_resolution_model()
+
+        self.assertEqual(result["status"], "READY")
+        self.assertEqual(result["inference_probe"], "PASSED")
+        self.assertEqual(result["input_size"], "32x32")
+        self.assertEqual(result["output_size"], "128x128")
+        self.assertEqual(result["model_sha256"], "test-model")
+
+    def test_model_self_test_returns_actual_load_error(self):
+        with (
+            patch.object(
+                sr, "_get_session",
+                side_effect=sr.SuperResolutionUnavailable("model download failed"),
+            ),
+            patch.object(
+                sr, "get_super_resolution_status",
+                return_value={"model_sha256": None},
+            ),
+            patch("builtins.print"),
+        ):
+            result = sr.diagnose_super_resolution_model()
+
+        self.assertEqual(result["status"], "FAILED")
+        self.assertEqual(result["inference_probe"], "FAILED")
+        self.assertIn("model download failed", result["error"])
+
     def test_tiled_inference_assembles_correct_target_shape(self):
         source = np.zeros((32, 48, 3), dtype=np.uint8)
         # Use a small target and tile size for a fast deterministic unit test.
