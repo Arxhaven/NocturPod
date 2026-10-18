@@ -100,6 +100,11 @@ print(
     f"fingerprint={_AUTH_TOKEN_FINGERPRINT}"
 )
 
+# Keep this marker in sync with backend.ai_engine's enhancement_mode. It prevents
+# a permanently failing capture from being retried on every gallery poll while
+# allowing failures from an older pipeline version to receive one migration retry.
+CURRENT_ENHANCEMENT_VERSION = "NOCTURPOD_REAL_ESRGAN_4K_V3"
+
 # Thread pool for asynchronous AI enhancement jobs
 ENHANCE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=3)
 
@@ -418,6 +423,36 @@ def stream_status():
 # --------------------------------------------------------------------------
 # Asynchronous AI Enhancement Pipeline
 # --------------------------------------------------------------------------
+def _mark_enhancement_failure(event_id: str, error_message: str) -> None:
+    """Persist failure diagnostics and a pipeline-version marker without losing prior metrics.
+
+    An old failed item can be retried after a model/config fix. If it fails under the
+    current version, automatic gallery scans stop retrying it repeatedly, but the
+    authenticated manual retry endpoint remains available.
+    """
+    try:
+        event = get_event(event_id) or {}
+        metrics = event.get("quality_metrics")
+        metrics = dict(metrics) if isinstance(metrics, dict) else {}
+        metrics["last_failed_enhancement_version"] = CURRENT_ENHANCEMENT_VERSION
+        metrics["last_failed_enhancement_error"] = str(error_message)[:700]
+        metrics.setdefault("metric_type", "heuristic_visibility_index_not_accuracy")
+        note = "AI_QUALITY:" + json.dumps(metrics, separators=(",", ":"), ensure_ascii=True)
+        update_event_status(
+            event_id,
+            status="ENHANCEMENT_FAILED",
+            ai_status="FAILED",
+            notes=note,
+        )
+    except Exception as exc:
+        log_system_event(
+            "ERROR", "AI_ENGINE",
+            f"Could not persist enhancement failure marker for {event_id}: {type(exc).__name__}: {exc}"
+        )
+        # Always set the failure status even if diagnostic metadata could not be stored.
+        update_event_status(event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED")
+
+
 def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, media_type: str, date_str: str) -> None:
     """Runs immediately after original capture/recording is finalized:
     1. Sets event to ENHANCEMENT_PROCESSING
@@ -439,7 +474,10 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
         if media_type == "IMAGE":
             res = enhance_image(orig_path, enhanced_local_path)
             if res.get("status") != "COMPLETE":
-                update_event_status(event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED")
+                _mark_enhancement_failure(
+                    event_id,
+                    f"Image enhancement failed: {res.get('error', 'unknown error')}",
+                )
                 log_system_event(
                     "ERROR", "AI_ENGINE",
                     f"Image enhancement failed for {event_id}; original preserved: {res.get('error', 'unknown error')}"
@@ -500,7 +538,10 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
             # Video enhancement
             res = enhance_video(orig_path, enhanced_local_path)
             if res.get("status") != "COMPLETE":
-                update_event_status(event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED")
+                _mark_enhancement_failure(
+                    event_id,
+                    f"Video enhancement failed: {res.get('error', 'unknown error')}",
+                )
                 log_system_event(
                     "ERROR", "AI_ENGINE",
                     f"Video enhancement failed for {event_id}; original preserved: {res.get('error', 'unknown error')}"
@@ -551,9 +592,8 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
             "ERROR", "AI_ENGINE",
             f"Enhancement error for {event_id}; original preserved: {type(ex).__name__}: {ex}"
         )
-        # Keep the last known successful AI_QUALITY note intact when updating
-        # an older event; diagnostic errors belong in system_logs.
-        update_event_status(event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED")
+        # Preserve any previous visibility metrics while marking this pipeline version failed.
+        _mark_enhancement_failure(event_id, f"{type(ex).__name__}: {ex}")
 
 
 # --------------------------------------------------------------------------
@@ -715,7 +755,10 @@ def _reprocess_existing_media_worker(
     except Exception as exc:
         print(f"[AI Backfill] Failed to reprocess legacy event {event_id}: {type(exc).__name__}: {exc}")
         try:
-            update_event_status(event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED")
+            _mark_enhancement_failure(
+                event_id,
+                f"Legacy enhancement backfill failed: {type(exc).__name__}: {exc}",
+            )
             log_system_event(
                 "ERROR", "AI_BACKFILL",
                 f"Legacy enhancement backfill failed for {event_id}: {type(exc).__name__}: {exc}"
@@ -763,11 +806,18 @@ def _queue_missing_media_backfill(base_url: str, force_failed: bool = False) -> 
                 # gallery poll; the authenticated manual endpoint can explicitly retry them.
                 quality_metrics = event.get("quality_metrics") or {}
                 current_mode = quality_metrics.get("enhancement_mode")
-                if event.get("enhanced_url") and current_mode == "NOCTURPOD_REAL_ESRGAN_4K_V3":
+                if event.get("enhanced_url") and current_mode == CURRENT_ENHANCEMENT_VERSION:
                     continue
                 if status == "ENHANCEMENT_FAILED" and not force_failed:
-                    skipped.append({"event_id": str(event_id), "reason": "previous enhancement failed; manual retry is available"})
-                    continue
+                    failed_version = quality_metrics.get("last_failed_enhancement_version")
+                    if failed_version == CURRENT_ENHANCEMENT_VERSION:
+                        skipped.append({
+                            "event_id": str(event_id),
+                            "reason": "enhancement already failed under the current pipeline version; manual retry is available",
+                        })
+                        continue
+                    # No failure marker for this version means this old item failed
+                    # before the checksum/model fix. Give it one automatic migration retry.
 
                 # New uploads are handled by /api/media/upload. However, retry a
                 # recently captured item immediately if its first enhancement failed.
