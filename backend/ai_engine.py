@@ -65,7 +65,9 @@ def _has_ir_color_cast(frame: np.ndarray) -> bool:
 
 
 def apply_adaptive_clahe(frame: np.ndarray, base_clip: float | None = None) -> np.ndarray:
-    """Denoise low-light luminance/chroma, then apply noise-aware CLAHE in LAB.
+    """Legacy utility retained for comparison; not the active production enhancement path.
+
+    It denoises low-light luminance/chroma, then applies noise-aware CLAHE in LAB.
 
     Very dark, grainy IR frames must not receive the strongest contrast boost:
     that amplifies sensor speckles and makes people less recognizable.
