@@ -5,6 +5,7 @@ Strictly removes all simulated/fake hardware metrics, PIR sensors, and drone ref
 """
 from __future__ import annotations
 
+import base64
 import datetime
 import json
 import os
@@ -159,44 +160,238 @@ def get_signed_storage_url(storage_path: str, expires_in: int = 7200) -> str | N
         print(f"[Supabase Storage] Signing failed for {normalized_path}: {type(e).__name__}: {e}")
     return fallback_url
 
+_STORAGE_UPLOAD_CONTEXT = threading.local()
+_STORAGE_TUS_THRESHOLD_BYTES = 6 * 1024 * 1024
+_STORAGE_TUS_CHUNK_BYTES = 6 * 1024 * 1024
+
+
+def get_last_storage_upload_error() -> str | None:
+    """Return the current thread's most recent storage upload error for event diagnostics."""
+    return getattr(_STORAGE_UPLOAD_CONTEXT, "last_error", None)
+
+
+def _set_storage_upload_error(message: str | None) -> None:
+    _STORAGE_UPLOAD_CONTEXT.last_error = message
+
+
+def _storage_resumable_endpoint() -> str:
+    """Use Supabase's direct storage hostname where the standard project hostname is known."""
+    parsed = urllib.parse.urlsplit(SUPABASE_URL)
+    hostname = parsed.hostname or ""
+    if hostname.endswith(".supabase.co") and not hostname.endswith(".storage.supabase.co"):
+        project_ref = hostname[:-len(".supabase.co")]
+        direct_host = f"{project_ref}.storage.supabase.co"
+        if parsed.port:
+            direct_host = f"{direct_host}:{parsed.port}"
+        return urllib.parse.urlunsplit((
+            parsed.scheme or "https",
+            direct_host,
+            "/storage/v1/upload/resumable",
+            "",
+            "",
+        ))
+    return f"{SUPABASE_URL.rstrip('/')}/storage/v1/upload/resumable"
+
+
+def _storage_auth_headers() -> dict[str, str]:
+    return {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Tus-Resumable": "1.0.0",
+    }
+
+
+def _tus_get_offset(upload_url: str) -> int:
+    headers = _storage_auth_headers()
+    request = urllib.request.Request(upload_url, headers=headers, method="HEAD")
+    with urllib.request.urlopen(request, timeout=30.0) as response:
+        raw_offset = response.headers.get("Upload-Offset")
+        if raw_offset is None:
+            raise RuntimeError("Supabase resumable upload did not return Upload-Offset on HEAD.")
+        return int(raw_offset)
+
+
+def _upload_to_supabase_storage_tus(
+    local_path: Path,
+    storage_path: str,
+    content_type: str,
+    file_size: int,
+) -> None:
+    """Stream large assets in resumable TUS chunks rather than buffering one giant POST."""
+    endpoint = _storage_resumable_endpoint()
+    metadata = {
+        "bucketName": SUPABASE_STORAGE_BUCKET,
+        "objectName": storage_path,
+        "contentType": content_type,
+        "cacheControl": "3600",
+    }
+    encoded_metadata = ",".join(
+        f"{key} {base64.b64encode(str(value).encode('utf-8')).decode('ascii')}"
+        for key, value in metadata.items()
+    )
+    create_headers = {
+        **_storage_auth_headers(),
+        "Upload-Length": str(file_size),
+        "Upload-Metadata": encoded_metadata,
+        "x-upsert": "true",
+    }
+    create_request = urllib.request.Request(
+        endpoint, data=b"", headers=create_headers, method="POST"
+    )
+
+    try:
+        with urllib.request.urlopen(create_request, timeout=60.0) as response:
+            location = response.headers.get("Location")
+            if not location:
+                raise RuntimeError("Supabase TUS creation succeeded without a Location header.")
+            upload_url = urllib.parse.urljoin(endpoint.rstrip("/") + "/", location)
+            offset = int(response.headers.get("Upload-Offset", "0"))
+    except urllib.error.HTTPError as exc:
+        try:
+            detail = exc.read(1000).decode("utf-8", "replace").replace("\\n", " ")
+        except Exception:
+            detail = ""
+        raise RuntimeError(
+            f"TUS session creation failed: HTTP {exc.code}: {detail or exc.reason}"
+        ) from exc
+    except Exception as exc:
+        raise RuntimeError(
+            f"TUS session creation failed: {type(exc).__name__}: {exc}"
+        ) from exc
+
+    if offset < 0 or offset > file_size:
+        raise RuntimeError(f"Supabase TUS session returned invalid initial offset {offset}.")
+
+    with local_path.open("rb") as source:
+        while offset < file_size:
+            source.seek(offset)
+            chunk = source.read(min(_STORAGE_TUS_CHUNK_BYTES, file_size - offset))
+            if not chunk:
+                raise RuntimeError(
+                    f"Local file ended before TUS upload completed at byte {offset} of {file_size}."
+                )
+
+            retries = 0
+            while True:
+                patch_headers = {
+                    **_storage_auth_headers(),
+                    "Content-Type": "application/offset+octet-stream",
+                    "Upload-Offset": str(offset),
+                }
+                patch_request = urllib.request.Request(
+                    upload_url, data=chunk, headers=patch_headers, method="PATCH"
+                )
+                try:
+                    with urllib.request.urlopen(patch_request, timeout=90.0) as response:
+                        new_offset = int(response.headers.get("Upload-Offset", str(offset + len(chunk))))
+                    if new_offset <= offset or new_offset > file_size:
+                        raise RuntimeError(
+                            f"Supabase TUS returned invalid offset {new_offset} after {offset}."
+                        )
+                    offset = new_offset
+                    break
+                except urllib.error.HTTPError as exc:
+                    try:
+                        detail = exc.read(1000).decode("utf-8", "replace").replace("\\n", " ")
+                    except Exception:
+                        detail = ""
+                    message = f"HTTP {exc.code}: {detail or exc.reason}"
+
+                    # If a server accepted a chunk but its response was lost, HEAD recovers
+                    # the server's authoritative offset before deciding whether to retry.
+                    can_retry = exc.code in (408, 409, 412, 425, 429, 500, 502, 503, 504)
+                    if not can_retry:
+                        raise RuntimeError(f"Supabase TUS PATCH failed: {message}") from exc
+                    try:
+                        server_offset = _tus_get_offset(upload_url)
+                        if offset < server_offset <= file_size:
+                            offset = server_offset
+                            break
+                    except Exception:
+                        pass
+                    if retries >= 3:
+                        raise RuntimeError(f"Supabase TUS PATCH retries exhausted: {message}") from exc
+                    time.sleep((1.0, 2.0, 4.0)[retries])
+                    retries += 1
+                except Exception as exc:
+                    try:
+                        server_offset = _tus_get_offset(upload_url)
+                        if offset < server_offset <= file_size:
+                            offset = server_offset
+                            break
+                    except Exception:
+                        pass
+                    if retries >= 3:
+                        raise RuntimeError(
+                            f"Supabase TUS PATCH retries exhausted at byte {offset}: "
+                            f"{type(exc).__name__}: {exc}"
+                        ) from exc
+                    time.sleep((1.0, 2.0, 4.0)[retries])
+                    retries += 1
+
+    if offset != file_size:
+        raise RuntimeError(f"Supabase TUS upload ended at {offset} of {file_size} bytes.")
+
+
 def upload_to_supabase_storage(local_path: Path | str, storage_path: str, content_type: str = "image/jpeg") -> bool:
-    """Upload a local file to Supabase Storage using a safely encoded object key."""
+    """Upload media to Supabase; use resumable TUS chunks for assets larger than 6 MiB."""
+    _set_storage_upload_error(None)
     if not has_supabase_config():
+        _set_storage_upload_error("Supabase Storage is not configured (SUPABASE_URL/service role key missing).")
         return False
 
     local_p = Path(local_path)
     normalized_path = _normalize_storage_path(storage_path)
     if not normalized_path:
-        print("[Supabase Storage] Refusing to upload to an invalid object path")
+        message = "Refused to upload to an invalid Supabase Storage object path."
+        _set_storage_upload_error(message)
+        print(f"[Supabase Storage] {message}")
         return False
     if not local_p.is_file():
-        print(f"[Supabase Storage] Upload source file does not exist: {local_p}")
+        message = f"Upload source file does not exist: {local_p.name}"
+        _set_storage_upload_error(message)
+        print(f"[Supabase Storage] {message}")
         return False
 
-    bucket = urllib.parse.quote(SUPABASE_STORAGE_BUCKET, safe="")
-    encoded_path = _encode_storage_path(normalized_path)
-    url = f"{SUPABASE_URL}/storage/v1/object/{bucket}/{encoded_path}"
-    req_headers = {
-        "apikey": SUPABASE_SERVICE_ROLE_KEY,
-        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
-        "Content-Type": content_type,
-        "x-upsert": "true"
-    }
     try:
-        with open(local_p, "rb") as f:
-            data = f.read()
+        file_size = local_p.stat().st_size
+        if file_size > _STORAGE_TUS_THRESHOLD_BYTES:
+            _upload_to_supabase_storage_tus(local_p, normalized_path, content_type, file_size)
+            print(
+                f"[Supabase Storage] Resumable upload complete for {normalized_path} "
+                f"({file_size} bytes, TUS)."
+            )
+            return True
+
+        bucket = urllib.parse.quote(SUPABASE_STORAGE_BUCKET, safe="")
+        encoded_path = _encode_storage_path(normalized_path)
+        url = f"{SUPABASE_URL}/storage/v1/object/{bucket}/{encoded_path}"
+        req_headers = {
+            "apikey": SUPABASE_SERVICE_ROLE_KEY,
+            "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+            "Content-Type": content_type,
+            "x-upsert": "true",
+        }
+        with local_p.open("rb") as source:
+            data = source.read()
         req = urllib.request.Request(url, data=data, headers=req_headers, method="POST")
-        with urllib.request.urlopen(req, timeout=25.0) as resp:
-            return resp.status in (200, 201)
-    except urllib.error.HTTPError as e:
+        with urllib.request.urlopen(req, timeout=60.0) as response:
+            if response.status in (200, 201):
+                return True
+            raise RuntimeError(f"Unexpected Supabase upload status {response.status}.")
+    except urllib.error.HTTPError as exc:
         try:
-            detail = e.read(500).decode("utf-8", "replace").replace("\\n", " ")
+            detail = exc.read(1000).decode("utf-8", "replace").replace("\\n", " ")
         except Exception:
             detail = ""
-        print(f"[Supabase Storage] Upload failed for {normalized_path}: HTTP {e.code}: {detail}")
+        message = f"Supabase Storage upload failed for {normalized_path}: HTTP {exc.code}: {detail or exc.reason}"
+        _set_storage_upload_error(message)
+        print(f"[Supabase Storage] {message}")
         return False
-    except Exception as e:
-        print(f"[Supabase Storage] Upload failed for {normalized_path}: {type(e).__name__}: {e}")
+    except Exception as exc:
+        message = f"Supabase Storage upload failed for {normalized_path}: {type(exc).__name__}: {exc}"
+        _set_storage_upload_error(message)
+        print(f"[Supabase Storage] {message}")
         return False
 
 def delete_from_supabase_storage(storage_paths: list[str]) -> bool:

@@ -27,5 +27,86 @@ jobs:
         run: python -m compileall -q backend tests
       - name: Install focused test dependencies
         run: python -m pip install numpy "opencv-python-headless>=4.9,<4.13"
-      - name: Test super-resolution geometry, tiling, and retry
+      - name: Test super-resolution geometry, tiling, retry, and diagnostics
         run: python -m unittest discover -s tests -p "test_super_resolution.py" -v
+      - name: Test Supabase resumable upload and failure diagnostics
+        run: python -m unittest discover -s tests -p "test_supabase_storage_uploads.py" -v
+      - name: Install ONNX Runtime for real model smoke test
+        run: python -m pip install "onnxruntime>=1.17,<2"
+      - name: Download pinned Real-ESRGAN model and run actual inference
+        run: |
+          python - <<'PY'
+          import json
+          from backend.super_resolution import diagnose_super_resolution_model
+
+          result = diagnose_super_resolution_model()
+          print(json.dumps(result, indent=2))
+          if result.get("status") != "READY":
+              raise SystemExit("Pinned Real-ESRGAN model failed load/inference smoke test")
+          PY
+      - name: Read production AI status and recent media processing outcomes
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import json
+          import urllib.request
+
+          base = "https://nocturpod-production.up.railway.app"
+
+          def read_json(path):
+              request = urllib.request.Request(
+                  base + path,
+                  headers={"User-Agent": "NocturPod-production-diagnostic/1.0"},
+              )
+              with urllib.request.urlopen(request, timeout=15) as response:
+                  return json.loads(response.read().decode("utf-8"))
+
+          try:
+              status = read_json("/api/ai/status")
+              sr = status.get("super_resolution") or {}
+              print("PRODUCTION_AI_STATUS")
+              print(json.dumps({
+                  "service": status.get("status"),
+                  "sr_state": sr.get("state"),
+                  "model_file_present": sr.get("model_file_present"),
+                  "error": sr.get("error"),
+                  "object_detection_available": (status.get("object_detection") or {}).get("available"),
+              }, indent=2))
+
+              media = []
+              for endpoint, kind in (("/api/media/images", "IMAGE"), ("/api/media/footage", "VIDEO")):
+                  try:
+                      items = read_json(endpoint)
+                      if isinstance(items, dict):
+                          items = items.get("events") or items.get("images") or items.get("footage") or []
+                      if isinstance(items, list):
+                          for item in items[:25]:
+                              item["_diagnostic_kind"] = kind
+                              media.append(item)
+                  except Exception as exc:
+                      print(f"Could not read {kind} records: {type(exc).__name__}: {exc}")
+
+              media.sort(key=lambda item: str(item.get("timestamp") or ""), reverse=True)
+              summary = []
+              for item in media[:12]:
+                  metrics = item.get("quality_metrics") or {}
+                  note = item.get("notes") or ""
+                  error = (
+                      metrics.get("last_failed_enhancement_error")
+                      or metrics.get("enhancement_error")
+                      or (note if "failed" in str(note).lower() or "could not be saved" in str(note).lower() else None)
+                  )
+                  summary.append({
+                      "event_id": item.get("event_id") or item.get("id"),
+                      "kind": item.get("_diagnostic_kind"),
+                      "status": item.get("status"),
+                      "ai_status": item.get("ai_status"),
+                      "processing_status": item.get("processing_status"),
+                      "has_enhanced_asset": bool(item.get("enhanced_url") or item.get("enhanced_storage_path")),
+                      "error": str(error)[:600] if error else None,
+                  })
+              print("PRODUCTION_RECENT_MEDIA")
+              print(json.dumps(summary, indent=2))
+          except Exception as exc:
+              print(f"Production API diagnostics unavailable: {type(exc).__name__}: {exc}")
+          PY

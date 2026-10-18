@@ -27,7 +27,11 @@ from flask import Flask, Response, jsonify, redirect, request, send_file, send_f
 from flask_cors import CORS
 
 from backend.ai_engine import ENGINE, enhance_image, enhance_video, _transcode_browser_mp4
-from backend.super_resolution import clear_cached_session_error, get_super_resolution_status
+from backend.super_resolution import (
+    clear_cached_session_error,
+    diagnose_super_resolution_model,
+    get_super_resolution_status,
+)
 from backend.database import (
     ack_command,
     check_device_timeouts,
@@ -37,6 +41,7 @@ from backend.database import (
     get_device_status,
     get_event,
     get_signed_storage_url,
+    get_last_storage_upload_error,
     has_supabase_config,
     init_db,
     list_events,
@@ -622,6 +627,38 @@ def _save_detection_status(event: dict[str, Any], payload: dict[str, Any]) -> No
     )
 
 
+
+def _mark_storage_upload_failure(
+    event_id: str,
+    media_type: str,
+    enhancement_result: dict[str, Any],
+) -> str:
+    """Keep the original, persist exact storage failure details, and avoid hot-loop retries."""
+    detail = get_last_storage_upload_error() or "Supabase Storage upload failed without an error detail."
+    metrics = enhancement_result.get("quality_metrics")
+    metrics = dict(metrics) if isinstance(metrics, dict) else {}
+    metrics.update({
+        "last_failed_enhancement_version": CURRENT_ENHANCEMENT_VERSION,
+        "last_failed_enhancement_error": detail[:700],
+        "last_failed_stage": "SUPABASE_STORAGE_UPLOAD",
+        "last_failed_media_type": media_type,
+        "metric_type": metrics.get("metric_type", "heuristic_visibility_index_not_accuracy"),
+    })
+    note = "AI_QUALITY:" + json.dumps(metrics, separators=(",", ":"), ensure_ascii=True)
+    update_event_status(
+        event_id,
+        status="COMPLETE",
+        ai_status="ORIGINAL_PRESERVED",
+        notes=note,
+    )
+    log_system_event(
+        "ERROR",
+        "AI_STORAGE",
+        f"{media_type} enhancement was generated for {event_id} but Supabase Storage upload failed: {detail[:700]}",
+    )
+    return detail
+
+
 def _detect_and_persist_image(event_id: str, enhanced_path: Path, original_path: Path) -> None:
     """Run object detection only after enhancement is safely persisted and marked complete."""
     try:
@@ -695,13 +732,11 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
                 enhanced_local_path, enhanced_storage_path, content_type="image/jpeg"
             )
             if has_supabase_config() and not enhanced_uploaded:
-                update_event_status(
-                    event_id,
-                    status="COMPLETE",
-                    ai_status="ORIGINAL_PRESERVED",
-                    notes="AI enhancement was generated but could not be saved to Supabase Storage; original media is preserved."
+                upload_error = _mark_storage_upload_failure(event_id, "IMAGE", res)
+                print(
+                    f"[AI Pipeline] Enhanced image upload failed for {event_id}; "
+                    f"original preserved. Storage error: {upload_error}"
                 )
-                print(f"[AI Pipeline] Enhanced image upload failed for {event_id}; preserving original")
                 return
 
             # Record ENHANCED media asset
@@ -738,13 +773,11 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
                 enhanced_local_path, enhanced_storage_path, content_type="video/mp4"
             )
             if has_supabase_config() and not enhanced_uploaded:
-                update_event_status(
-                    event_id,
-                    status="COMPLETE",
-                    ai_status="ORIGINAL_PRESERVED",
-                    notes="Video enhancement was generated but could not be saved to Supabase Storage; original media is preserved."
+                upload_error = _mark_storage_upload_failure(event_id, "VIDEO", res)
+                print(
+                    f"[AI Pipeline] Enhanced video upload failed for {event_id}; "
+                    f"original preserved. Storage error: {upload_error}"
                 )
-                print(f"[AI Pipeline] Enhanced video upload failed for {event_id}; preserving original")
                 return
 
             record_media_asset({
@@ -989,13 +1022,36 @@ def _queue_missing_media_backfill(base_url: str, force_failed: bool = False) -> 
 
                 status = str(event.get("status") or "").upper()
                 ai_status = str(event.get("ai_status") or "").upper()
-                if status in ("AI_BACKFILL_QUEUED", "ENHANCEMENT_PROCESSING") or ai_status == "PROCESSING":
-                    continue
-                # Re-run old assets until they have the learned 4K Real-ESRGAN version.
-                # Originals are never overwritten. Failed items stop auto-retrying on each
-                # gallery poll; the authenticated manual endpoint can explicitly retry them.
                 quality_metrics = event.get("quality_metrics") or {}
                 current_mode = quality_metrics.get("enhancement_mode")
+
+                # Do not leave a dead queue claim stuck forever: reclaim only queue/processing
+                # states older than the same one-hour stale threshold used by event reconciliation.
+                if status in ("AI_BACKFILL_QUEUED", "ENHANCEMENT_PROCESSING") or ai_status == "PROCESSING":
+                    if not _is_stale_enhancement(event):
+                        continue
+                    log_system_event(
+                        "WARNING", "AI_BACKFILL",
+                        f"Reclaiming stale enhancement job for {event_id} (status={status}, ai_status={ai_status})",
+                    )
+
+                # Storage failures leave the ORIGINAL intact. Do not loop every five minutes
+                # on a persistent upload error; the authenticated retry endpoint can retry it.
+                if (
+                    ai_status == "ORIGINAL_PRESERVED"
+                    and quality_metrics.get("last_failed_stage") == "SUPABASE_STORAGE_UPLOAD"
+                    and quality_metrics.get("last_failed_enhancement_version") == CURRENT_ENHANCEMENT_VERSION
+                    and not force_failed
+                ):
+                    skipped.append({
+                        "event_id": str(event_id),
+                        "reason": "enhanced file could not be uploaded to Supabase Storage; manual retry is available",
+                    })
+                    continue
+
+                # Re-run old assets until they have the learned 4K Real-ESRGAN version.
+                # Originals are never overwritten. Failed items stop auto-retrying on each
+                # gallery poll; the authenticated manual retry endpoint can explicitly retry them.
                 if event.get("enhanced_url") and current_mode == CURRENT_ENHANCEMENT_VERSION:
                     continue
                 if status == "ENHANCEMENT_FAILED" and not force_failed:
@@ -1622,6 +1678,65 @@ def detect_uploaded_image():
         "annotated_image": annotated_image,
         "simulated": False,
     })
+
+
+
+@app.post("/api/ai/enhancement-diagnostics")
+def enhancement_diagnostics():
+    """Authenticated, nondestructive model self-test plus recent enhancement failures."""
+    if not verify_device_auth():
+        return jsonify({"error": "Unauthorized device"}), 401
+
+    model_test = diagnose_super_resolution_model()
+    recent_failures: list[dict[str, Any]] = []
+    try:
+        for event in list_events(limit=40, offset=0):
+            status = str(event.get("status") or "").upper()
+            ai_status_value = str(event.get("ai_status") or "").upper()
+            metrics = event.get("quality_metrics")
+            metrics = metrics if isinstance(metrics, dict) else {}
+            error = metrics.get("last_failed_enhancement_error")
+
+            # Older upload failures used human-readable notes rather than the
+            # structured AI_QUALITY marker. Retain only the useful diagnostic text.
+            notes = event.get("notes")
+            if not error and isinstance(notes, str) and "could not be saved to Supabase" in notes:
+                error = notes
+            failed = (
+                status == "ENHANCEMENT_FAILED"
+                or ai_status_value in ("FAILED", "ORIGINAL_PRESERVED")
+                or status in ("ENHANCEMENT_PROCESSING", "AI_BACKFILL_QUEUED")
+            )
+            if not failed:
+                continue
+            recent_failures.append({
+                "event_id": event.get("event_id"),
+                "type": event.get("type"),
+                "timestamp": event.get("timestamp"),
+                "status": status or "UNKNOWN",
+                "ai_status": ai_status_value or "UNKNOWN",
+                "processing_status": event.get("processing_status"),
+                "error": str(error)[:700] if error else None,
+            })
+            if len(recent_failures) >= 8:
+                break
+    except Exception as exc:
+        print(f"[AI Diagnostics] Could not read recent events: {type(exc).__name__}: {exc}")
+
+    return jsonify({
+        "status": "OK" if model_test.get("status") == "READY" else "FAILED",
+        "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "super_resolution": model_test,
+        "storage": {
+            "supabase_configured": has_supabase_config(),
+            "media_directory_writable": os.access(str(MEDIA_DIR), os.W_OK),
+        },
+        "recent_enhancement_issues": recent_failures,
+        "notes": [
+            "The model probe uses a temporary 32x32 test frame and does not modify saved media.",
+            "A passing model probe verifies ONNX inference, not the separate Supabase upload path.",
+        ],
+    }), 200 if model_test.get("status") == "READY" else 503
 
 
 @app.get("/api/ai/status")

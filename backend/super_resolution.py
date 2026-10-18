@@ -311,6 +311,57 @@ def upscale_to_4k(frame: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
     }
 
 
+
+def diagnose_super_resolution_model() -> dict[str, Any]:
+    """Load the real ONNX model and execute a tiny inference without touching user media."""
+    started = time.perf_counter()
+    path, custom_path = _model_path()
+    try:
+        session, model_hash = _get_session()
+        inputs = session.get_inputs()
+        outputs = session.get_outputs()
+        if not inputs or not outputs:
+            raise SuperResolutionUnavailable("ONNX model has no usable input or output tensors.")
+
+        # Exercise the same actual model/session and _run_tile path used for production
+        # enhancement, but keep the test small (32x32 -> 128x128) and nondestructive.
+        probe = np.zeros((32, 32, 3), dtype=np.uint8)
+        result = _run_tile(session, inputs[0].name, outputs[0].name, probe)
+        if result.shape != (128, 128, 3):
+            raise SuperResolutionUnavailable(
+                f"Model inference returned {result.shape}; expected (128, 128, 3)."
+            )
+        return {
+            "status": "READY",
+            "model": MODEL_NAME,
+            "model_file": path.name,
+            "model_file_present": path.is_file(),
+            "custom_model_path_configured": custom_path,
+            "model_sha256": model_hash,
+            "inference_probe": "PASSED",
+            "input_size": "32x32",
+            "output_size": "128x128",
+            "providers": session.get_providers() if callable(getattr(session, "get_providers", None)) else [],
+            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+            "error": None,
+        }
+    except Exception as exc:
+        state = get_super_resolution_status()
+        message = f"{type(exc).__name__}: {exc}"
+        print(f"[SuperResolution Diagnostic] FAILED: {message}")
+        return {
+            "status": "FAILED",
+            "model": MODEL_NAME,
+            "model_file": path.name,
+            "model_file_present": path.is_file(),
+            "custom_model_path_configured": custom_path,
+            "model_sha256": state.get("model_sha256"),
+            "inference_probe": "FAILED",
+            "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+            "error": message[:1000],
+        }
+
+
 def clear_cached_session_error() -> None:
     """Allow an operator to retry a previous model download/initialization failure immediately."""
     global _SESSION_ERROR, _SESSION_MODEL_PATH, _SESSION_ERROR_AT
