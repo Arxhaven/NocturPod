@@ -61,14 +61,22 @@ export default function LivePlayer({
     };
   }, [streamState]);
 
+  useEffect(() => {
+    const syncFullscreenState = () => {
+      setIsFullscreen(document.fullscreenElement === containerRef.current);
+    };
+    document.addEventListener('fullscreenchange', syncFullscreenState);
+    return () => document.removeEventListener('fullscreenchange', syncFullscreenState);
+  }, []);
+
   const handleFullscreenToggle = () => {
     if (!containerRef.current) return;
     if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen?.().catch(console.error);
-      setIsFullscreen(true);
+      const request = containerRef.current.requestFullscreen?.();
+      if (request?.catch) request.catch(() => setIsFullscreen(false));
     } else {
-      document.exitFullscreen?.().catch(console.error);
-      setIsFullscreen(false);
+      const exit = document.exitFullscreen?.();
+      if (exit?.catch) exit.catch(() => setIsFullscreen(false));
     }
   };
 
@@ -91,7 +99,7 @@ export default function LivePlayer({
           <img 
             key={streamKey}
             src={`${BACKEND_HOST}/api/stream/live?t=${streamKey}`}
-            alt="NocturPod Live OV5647 Stream"
+            alt="NocturPod live camera stream"
             className={`live-video-element ${streamState === 'STREAMING' ? 'visible' : 'hidden'}`}
             onLoad={() => setStreamState('STREAMING')}
             onError={() => setStreamState('OFFLINE')}
@@ -135,13 +143,13 @@ export default function LivePlayer({
                   <span className="live-dot" />
                   <span className="live-text mono">
                     {streamState === 'STREAMING' 
-                      ? 'OV5647 LIVE' 
+                      ? 'CAMERA LIVE' 
                       : streamState === 'CONNECTING' 
                         ? 'CONNECTING' 
                         : 'STREAM OFFLINE'}
                   </span>
                 </div>
-                <span className="hud-cam-model mono">OV5647 IR-CUT</span>
+                <span className="hud-cam-model mono">EDGE CAMERA</span>
               </div>
 
               <div className="hud-right-meta mono">
