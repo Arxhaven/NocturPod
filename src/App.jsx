@@ -300,13 +300,24 @@ export default function App() {
       ['illumination mode', () => setLightMode(lightingSettings.mode)],
     ];
 
-    // Binary/relay installations intentionally remain at full on/off. Only request
-    // dimming when the user chooses a level below 100%; actual support depends on Pi wiring.
-    if (Number(lightingSettings.white_intensity) < 100) {
-      operations.push(['white-light intensity', () => setLightIntensity('WHITE', lightingSettings.white_intensity)]);
+    // Dimming is optional and requires PWM-compatible hardware. Send a command
+    // when a slider is below 100% or when the previously selected dimmed level is
+    // being reset to 100%; avoid requesting PWM on a fresh full-on/full-off setup.
+    let previousLighting = { white_intensity: 100, night_intensity: 100 };
+    try {
+      const saved = JSON.parse(window.localStorage.getItem('nocturpod-hardware-settings-v1') || '{}');
+      previousLighting = { ...previousLighting, ...(saved.lightingSettings || {}) };
+    } catch {
+      // Local state is only used to decide whether a reset command is necessary.
     }
-    if (Number(lightingSettings.night_intensity) < 100) {
-      operations.push(['night-light intensity', () => setLightIntensity('NIGHT', lightingSettings.night_intensity)]);
+
+    const requestedWhite = Number(lightingSettings.white_intensity);
+    const requestedNight = Number(lightingSettings.night_intensity);
+    if (requestedWhite < 100 || Number(previousLighting.white_intensity) < 100) {
+      operations.push(['white-light intensity', () => setLightIntensity('WHITE', requestedWhite)]);
+    }
+    if (requestedNight < 100 || Number(previousLighting.night_intensity) < 100) {
+      operations.push(['night-light intensity', () => setLightIntensity('NIGHT', requestedNight)]);
     }
 
     const results = await Promise.allSettled(operations.map(([, send]) => send()));
