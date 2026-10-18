@@ -714,7 +714,7 @@ def _reprocess_existing_media_worker(
                 pass
 
 
-def _queue_missing_media_backfill(base_url: str) -> dict[str, Any]:
+def _queue_missing_media_backfill(base_url: str, force_failed: bool = False) -> dict[str, Any]:
     """Queue every persisted capture/recording with an ORIGINAL but no ENHANCED asset.
 
     The original object and asset record are never overwritten. Event status is
@@ -742,16 +742,15 @@ def _queue_missing_media_backfill(base_url: str) -> dict[str, Any]:
                 ai_status = str(event.get("ai_status") or "").upper()
                 if status in ("AI_BACKFILL_QUEUED", "ENHANCEMENT_PROCESSING") or ai_status == "PROCESSING":
                     continue
-                # Re-run older enhanced assets until they contain the current
-                # V2 enhancement-mode marker. This applies the new IR red/purple-cast
-                # normalization to prior photos/videos while never changing ORIGINAL.
+                # Re-run old assets until they have the learned 4K Real-ESRGAN version.
+                # Originals are never overwritten. Failed items stop auto-retrying on each
+                # gallery poll; the authenticated manual endpoint can explicitly retry them.
                 quality_metrics = event.get("quality_metrics") or {}
                 current_mode = quality_metrics.get("enhancement_mode")
-                if event.get("enhanced_url") and current_mode in (
-                    "NOISE_AWARE_CLAHE_V2",
-                    "IR_CAST_GRAYSCALE_CLAHE_V2",
-                    "AUTO_IR_CAST_GRAYSCALE_CLAHE_V2",
-                ):
+                if event.get("enhanced_url") and current_mode == "NOCTURPOD_REAL_ESRGAN_4K_V3":
+                    continue
+                if status == "ENHANCEMENT_FAILED" and not force_failed:
+                    skipped.append({"event_id": str(event_id), "reason": "previous enhancement failed; manual retry is available"})
                     continue
 
                 # New uploads are handled by /api/media/upload. However, retry a
@@ -850,7 +849,7 @@ def reprocess_missing_media():
         return jsonify({"error": "Unauthorized device"}), 401
 
     try:
-        result = _queue_missing_media_backfill(request.host_url.rstrip("/"))
+        result = _queue_missing_media_backfill(request.host_url.rstrip("/"), force_failed=True)
         return jsonify({
             "status": "QUEUED",
             **result,
