@@ -171,6 +171,14 @@ export default function VideoPlayerModal({ video, onClose, onDelete }) {
               </div>
             </>
           )}
+          {quality?.ir_color_cast_detected && (
+            <div className="v-meta-cell" title="Frames with strong red/purple IR colour cast are normalized to grayscale in the enhanced copy; the original recording is unchanged.">
+              <span className="v-meta-label mono">IR CAST SAMPLES</span>
+              <span className="v-meta-value mono">
+                {quality.ir_cast_sample_pct != null ? quality.ir_cast_sample_pct.toFixed(1) + '% → GRAYSCALE' : 'NORMALIZED → GRAYSCALE'}
+              </span>
+            </div>
+          )}
         </div>
         {qualityBefore != null && (
           <div className="quality-disclaimer mono">*Heuristic quality score sampled from video frames; not a person-recognition accuracy percentage.</div>
