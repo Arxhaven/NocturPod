@@ -25,7 +25,7 @@ from flask import Flask, Response, jsonify, redirect, request, send_from_directo
 from flask_cors import CORS
 
 from backend.ai_engine import ENGINE, enhance_image, enhance_video
-from backend.super_resolution import clear_cached_session_error
+from backend.super_resolution import clear_cached_session_error, get_super_resolution_status
 from backend.database import (
     ack_command,
     check_device_timeouts,
@@ -965,10 +965,12 @@ def serve_local_media_fallback(filepath: str):
 
 @app.get("/api/ai/status")
 def ai_status():
+    sr_status = get_super_resolution_status()
     return jsonify({
         "status": "ONLINE",
-        "enhancement_pipeline": "Noise-aware CLAHE + automatic IR colour-cast normalization (V2)",
+        "enhancement_pipeline": "Real-ESRGAN general x4v3 ONNX — learned restoration and 4K super-resolution",
         "detection_engine": "YOLOv8n Perimeter Security",
+        "super_resolution": sr_status,
         "is_ready": ENGINE.is_ready
     })
 
