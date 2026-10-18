@@ -760,6 +760,8 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
                 ev["ai_status"] = "COMPLETE" if enh else "ORIGINAL_PRESERVED"
                 ev["processing_status"] = "COMPLETE" if enh else ("FAILED" if orig else "NONE")
                 orphaned_to_fix.append(eid)
+            elif status in ("AI_BACKFILL_QUEUED", "ENHANCEMENT_PROCESSING") and ev.get("ai_status") == "PROCESSING":
+                ev["processing_status"] = "PROCESSING"
             elif enh:
                 ev["processing_status"] = enh.get("processing_status", "COMPLETE")
             elif orig:
@@ -851,6 +853,8 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
                 ev["status"] = "COMPLETE" if (enh or orig) else "FAILED"
                 ev["ai_status"] = "COMPLETE" if enh else "ORIGINAL_PRESERVED"
                 ev["processing_status"] = "COMPLETE" if enh else ("FAILED" if orig else "NONE")
+            elif status in ("AI_BACKFILL_QUEUED", "ENHANCEMENT_PROCESSING") and ev.get("ai_status") == "PROCESSING":
+                ev["processing_status"] = "PROCESSING"
             elif enh:
                 ev["processing_status"] = enh.get("processing_status", "COMPLETE")
             elif orig:
