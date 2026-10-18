@@ -17,12 +17,37 @@ export default function AIScreen() {
         <div className="ai-strip-col">
           <span className="strip-kicker mono">AUTHENTIC EDGE AI STATUS</span>
           <div className="strip-title-row">
-            <span className="strip-title">YOLOv8 & ADAPTIVE CLAHE PIPELINE</span>
+            <span className="strip-title">REAL-ESRGAN 4K SUPER-RESOLUTION + YOLOv8</span>
             <StatusBadge status={aiInfo?.status || 'ONLINE'} />
           </div>
           <span className="strip-sub mono">
-            {aiInfo?.enhancement_pipeline || 'Adaptive CLAHE + Detail Sharpening'}
+            {aiInfo?.enhancement_pipeline || 'Real-ESRGAN x4 learned restoration with 4K-target output'}
           </span>
+          <div className="ai-metrics-row">
+            <div className="ai-met-item">
+              <span className="met-label mono">SUPER-RESOLUTION MODEL</span>
+              <span className={'met-val mono ' + (aiInfo?.super_resolution?.state === 'READY' ? 'active' : '')}>
+                {aiInfo?.super_resolution?.state || 'CHECKING'}
+              </span>
+            </div>
+            <div className="ai-met-item">
+              <span className="met-label mono">OUTPUT TARGET</span>
+              <span className="met-val mono">
+                {aiInfo?.super_resolution?.target_long_edge
+                  ? aiInfo.super_resolution.target_long_edge + ' PX LONG EDGE'
+                  : '3840 PX LONG EDGE'}
+              </span>
+            </div>
+            <div className="ai-met-item">
+              <span className="met-label mono">RUNTIME</span>
+              <span className="met-val mono">{aiInfo?.super_resolution?.runtime || 'ONNX Runtime CPU'}</span>
+            </div>
+          </div>
+          {aiInfo?.super_resolution?.error && (
+            <div className="strip-sub mono">
+              MODEL ERROR: {aiInfo.super_resolution.error}
+            </div>
+          )}
         </div>
       </div>
     </div>
