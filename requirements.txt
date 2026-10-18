@@ -14,3 +14,7 @@ PyYAML>=6.0
 
 # Ultralytics headless distribution avoids pulling the GUI-enabled opencv-python wheel.
 ultralytics-opencv-headless>=8.3.0
+
+# HC-SR501 GPIO interface used by the Raspberry Pi agent.
+# The Pi OS gpiozero/lgpio system packages are recommended for the physical GPIO backend.
+gpiozero>=2.0.1
