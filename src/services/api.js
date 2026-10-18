@@ -322,6 +322,29 @@ export async function fetchAiStatus() {
   return null;
 }
 
+
+/**
+ * Performs a real, nondestructive ONNX inference probe on the backend and returns
+ * recent persisted enhancement failure diagnostics.
+ */
+export async function runEnhancementDiagnostics() {
+  const response = await fetchWithTimeout(
+    buildApiUrl('/api/ai/enhancement-diagnostics'),
+    {
+      method: 'POST',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({}),
+    },
+    120000
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok && !data?.super_resolution) {
+    throw new Error(data?.error || `Enhancement diagnostics failed (${response.status}). Check the dashboard API key and backend logs.`);
+  }
+  return data;
+}
+
+
 /**
  * Fetches live stream status (true FPS, resolution, camera_status).
  */
