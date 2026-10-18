@@ -638,7 +638,9 @@ def upload_media():
 # --------------------------------------------------------------------------
 _BACKFILL_QUEUE_LOCK = threading.Lock()
 _AUTO_BACKFILL_GUARD = threading.Lock()
-_AUTO_BACKFILL_STARTED = False
+_AUTO_BACKFILL_RUNNING = False
+_AUTO_BACKFILL_LAST_START = 0.0
+_AUTO_BACKFILL_COOLDOWN_SECONDS = 300.0
 
 
 def _is_recent_media_event(event: dict[str, Any], within_seconds: int = 300) -> bool:
@@ -800,15 +802,19 @@ def _queue_missing_media_backfill(base_url: str) -> dict[str, Any]:
 
 
 def _start_auto_backfill(base_url: str) -> None:
-    """Start a single background scan when the gallery is first requested."""
-    global _AUTO_BACKFILL_STARTED
+    """Periodically scan once per cooldown while keeping overlapping scans out."""
+    global _AUTO_BACKFILL_RUNNING, _AUTO_BACKFILL_LAST_START
     with _AUTO_BACKFILL_GUARD:
-        if _AUTO_BACKFILL_STARTED:
+        now = time.monotonic()
+        if _AUTO_BACKFILL_RUNNING:
             return
-        _AUTO_BACKFILL_STARTED = True
+        if now - _AUTO_BACKFILL_LAST_START < _AUTO_BACKFILL_COOLDOWN_SECONDS:
+            return
+        _AUTO_BACKFILL_RUNNING = True
+        _AUTO_BACKFILL_LAST_START = now
 
     def _run() -> None:
-        global _AUTO_BACKFILL_STARTED
+        global _AUTO_BACKFILL_RUNNING
         try:
             result = _queue_missing_media_backfill(base_url)
             print(
@@ -817,9 +823,12 @@ def _start_auto_backfill(base_url: str) -> None:
             )
         except Exception as exc:
             print(f"[AI Backfill] Automatic historical scan failed: {type(exc).__name__}: {exc}")
-            # Let a later gallery request retry after a transient backend/database outage.
+            # Permit an immediate retry after a scan-level/transient failure.
             with _AUTO_BACKFILL_GUARD:
-                _AUTO_BACKFILL_STARTED = False
+                _AUTO_BACKFILL_LAST_START = 0.0
+        finally:
+            with _AUTO_BACKFILL_GUARD:
+                _AUTO_BACKFILL_RUNNING = False
 
     threading.Thread(target=_run, name="nocturpod-ai-backfill", daemon=True).start()
 
