@@ -370,6 +370,7 @@ export default function App() {
 
       {/* Main App Workspace */}
       <div className={`workspace-container ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+        {!['overview', 'live'].includes(activeTab) && (
         <TopBar 
           deviceStatus={deviceStatus} 
           backendOnline={backendOnline}
@@ -381,6 +382,7 @@ export default function App() {
           onToggleLightMode={handleToggleLightMode}
           isSwitchingLight={isSwitchingLight}
         />
+        )}
 
         {/* Global Toast Notification */}
         {toastNotification && (
@@ -391,7 +393,7 @@ export default function App() {
         )}
 
         {/* Authenticated Workspace Content Router */}
-        <main className="content-viewport" id="main-content">
+        <main className={`content-viewport ${['overview', 'live'].includes(activeTab) ? 'immersive-viewport' : ''}`} id="main-content">
           {activeTab === 'overview' && (
             <OverviewScreen 
               deviceStatus={deviceStatus}
