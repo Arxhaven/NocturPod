@@ -22,3 +22,6 @@ lgpio>=0.2.2.0; platform_machine == "aarch64" or platform_machine == "armv7l"
 
 # CPU-only ONNX Runtime for tiled Real-ESRGAN x4 super-resolution.
 onnxruntime>=1.17.0,<2.0
+
+# Portable FFmpeg binary for browser-compatible H.264 MP4 playback/transcoding.
+imageio-ffmpeg>=0.5.1
