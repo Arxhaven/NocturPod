@@ -742,10 +742,15 @@ def _queue_missing_media_backfill(base_url: str) -> dict[str, Any]:
                 ai_status = str(event.get("ai_status") or "").upper()
                 if status in ("AI_BACKFILL_QUEUED", "ENHANCEMENT_PROCESSING") or ai_status == "PROCESSING":
                     continue
-                # Re-run older enhanced assets once when they lack the new
-                # before/after visibility metrics; this marks the older enhancement
-                # algorithm/version as stale without ever touching the ORIGINAL.
-                if event.get("enhanced_url") and event.get("quality_metrics"):
+                # Re-run older enhanced assets until they contain the current
+                # V2 enhancement-mode marker. This applies the new IR red/purple-cast
+                # normalization to prior photos/videos while never changing ORIGINAL.
+                quality_metrics = event.get("quality_metrics") or {}
+                current_mode = quality_metrics.get("enhancement_mode")
+                if event.get("enhanced_url") and current_mode in (
+                    "NOISE_AWARE_CLAHE_V2",
+                    "IR_CAST_GRAYSCALE_CLAHE_V2",
+                ):
                     continue
 
                 # New uploads are handled by /api/media/upload. However, retry a
@@ -958,7 +963,7 @@ def serve_local_media_fallback(filepath: str):
 def ai_status():
     return jsonify({
         "status": "ONLINE",
-        "enhancement_pipeline": "Adaptive CLAHE + Detail Sharpening (ai_model_source)",
+        "enhancement_pipeline": "Noise-aware CLAHE + automatic IR colour-cast normalization (V2)",
         "detection_engine": "YOLOv8n Perimeter Security",
         "is_ready": ENGINE.is_ready
     })
