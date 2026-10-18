@@ -39,12 +39,13 @@ class SpoolUploader:
             except Exception as e:
                 print(f"[Spool] Failed to write spool manifest: {e}")
 
-    def enqueue(self, file_path: Path, event_id: str, media_type: str, duration: str = "0s") -> None:
+    def enqueue(self, file_path: Path, event_id: str, media_type: str, duration: str = "0s", capture_source: str = "MANUAL") -> None:
         item = {
             "file_path": str(file_path.resolve()),
             "event_id": event_id,
             "media_type": media_type,
             "duration": duration,
+            "capture_source": (capture_source or "MANUAL").upper(),
             "queued_at": time.time()
         }
         with self._lock:
@@ -76,7 +77,8 @@ class SpoolUploader:
                 file_path=path,
                 event_id=item["event_id"],
                 media_type=item["media_type"],
-                duration=item.get("duration", "0s")
+                duration=item.get("duration", "0s"),
+                capture_source=item.get("capture_source", "MANUAL")
             )
             if success:
                 uploaded_count += 1
