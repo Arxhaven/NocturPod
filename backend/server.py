@@ -454,6 +454,172 @@ def _mark_enhancement_failure(event_id: str, error_message: str) -> None:
         update_event_status(event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED")
 
 
+def _run_object_detection_with_fallback(
+    enhanced_frame: np.ndarray | None,
+    original_frame: np.ndarray | None = None,
+) -> tuple[dict[str, Any], str, list[str]]:
+    """Detect on the enhanced frame first; retry the untouched original if no boxes appear."""
+    sources_checked: list[str] = []
+    if enhanced_frame is not None:
+        result = ENGINE.infer(
+            enhanced_frame, conf=0.22, already_enhanced=True, source="ENHANCED"
+        )
+        selected_source = "ENHANCED"
+        sources_checked.append("ENHANCED")
+        if result.get("status") == "COMPLETE" and int(result.get("count") or 0) > 0:
+            return result, selected_source, sources_checked
+        if result.get("status") != "COMPLETE" or original_frame is None:
+            return result, selected_source, sources_checked
+        original_result = ENGINE.infer(
+            original_frame, conf=0.18, already_enhanced=True, source="ORIGINAL"
+        )
+        sources_checked.append("ORIGINAL")
+        if original_result.get("status") == "COMPLETE" and int(original_result.get("count") or 0) > 0:
+            return original_result, "ORIGINAL", sources_checked
+        # Keep the primary enhanced-frame result if both completed but found no candidates.
+        return result, selected_source, sources_checked
+
+    if original_frame is not None:
+        result = ENGINE.infer(
+            original_frame, conf=0.18, already_enhanced=True, source="ORIGINAL"
+        )
+        return result, "ORIGINAL", ["ORIGINAL"]
+
+    return {
+        "status": "FAILED",
+        "error": "Neither the enhanced nor original image could be decoded.",
+        "detections": [],
+        "count": 0,
+    }, "NONE", []
+
+
+def _format_detection_status(
+    result: dict[str, Any],
+    source: str,
+    sources_checked: list[str] | None = None,
+) -> dict[str, Any]:
+    """User-facing result that distinguishes a clear scene from a detector failure."""
+    state = str(result.get("status") or "FAILED").upper()
+    count = int(result.get("count") or len(result.get("detections") or []))
+    if state == "COMPLETE" and count > 0:
+        ui_status = "COMPLETE"
+        message = f"Detected {count} object(s). Confidence values are model scores, not verified accuracy."
+    elif state == "COMPLETE":
+        ui_status = "NO_DETECTIONS"
+        message = (
+            "The detector ran but found no objects above its threshold. "
+            "Darkness, blur, distance, or occlusion can still hide a person or object."
+        )
+    elif state == "UNAVAILABLE":
+        ui_status = "UNAVAILABLE"
+        message = result.get("error") or "The object-detection model is not available in the backend."
+    else:
+        ui_status = "FAILED"
+        message = result.get("error") or "Object detection failed for this image."
+    return {
+        "status": ui_status,
+        "count": count if state == "COMPLETE" else 0,
+        "model": result.get("model") or Path(ENGINE.model_path).name,
+        "source": source,
+        "sources_checked": sources_checked or ([source] if source != "NONE" else []),
+        "confidence_threshold_used": result.get("confidence_threshold_used"),
+        "inference_size": result.get("inference_size"),
+        "processing_time_ms": result.get("processing_time_ms"),
+        "message": message,
+        "error": result.get("error") if state in ("FAILED", "UNAVAILABLE") else None,
+    }
+
+
+def _normalized_detection_box(detection: dict[str, Any], dimensions: dict[str, Any] | None) -> list[float]:
+    """Convert pixel coordinates from legacy/inference payloads to normalized ratios."""
+    normalized = detection.get("normalized_box")
+    if isinstance(normalized, (list, tuple)) and len(normalized) == 4:
+        try:
+            return [float(np.clip(float(value), 0.0, 1.0)) for value in normalized]
+        except (TypeError, ValueError):
+            pass
+    try:
+        width = max(1.0, float((dimensions or {}).get("width") or 0))
+        height = max(1.0, float((dimensions or {}).get("height") or 0))
+        x1, y1, x2, y2 = (float(detection[key]) for key in ("x1", "y1", "x2", "y2"))
+        return [
+            float(np.clip(x1 / width, 0.0, 1.0)),
+            float(np.clip(y1 / height, 0.0, 1.0)),
+            float(np.clip(x2 / width, 0.0, 1.0)),
+            float(np.clip(y2 / height, 0.0, 1.0)),
+        ]
+    except (KeyError, TypeError, ValueError):
+        return [0.0, 0.0, 0.0, 0.0]
+
+
+def _store_object_detections(
+    event_id: str,
+    result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Replace persisted boxes after a successful scan and store resolution-independent ratios."""
+    if result.get("status") != "COMPLETE":
+        return []
+    clear_detections_for_event(event_id)
+    dimensions = result.get("image_dimensions") or {}
+    stored: list[dict[str, Any]] = []
+    for detection in result.get("detections") or []:
+        box = _normalized_detection_box(detection, dimensions)
+        record_detection(
+            event_id, str(detection.get("label") or "object"),
+            float(detection.get("confidence") or 0.0),
+            box[0], box[1], box[2], box[3],
+        )
+        stored.append({
+            "label": str(detection.get("label") or "object"),
+            "confidence": float(detection.get("confidence") or 0.0),
+            "x1": box[0], "y1": box[1], "x2": box[2], "y2": box[3],
+            "coordinates_normalized": True,
+        })
+    return stored
+
+
+def _read_event_image(event: dict[str, Any], variant: str, base_url: str) -> np.ndarray | None:
+    """Load a persisted original/enhanced still from local cache or private Supabase Storage."""
+    prefix = "enhanced" if variant == "enhanced" else "original"
+    storage_path = event.get(f"{prefix}_storage_path")
+    media_url = event.get(f"{prefix}_url")
+
+    if storage_path:
+        local_path = MEDIA_DIR / Path(str(storage_path)).name
+        if local_path.is_file():
+            frame = cv2.imread(str(local_path), cv2.IMREAD_COLOR)
+            if frame is not None:
+                return frame
+        if has_supabase_config():
+            media_url = get_signed_storage_url(str(storage_path)) or media_url
+        elif not media_url:
+            encoded_path = urllib.parse.quote(str(storage_path).lstrip("/"), safe="/")
+            media_url = f"{base_url.rstrip('/')}/api/media/file/{encoded_path}"
+
+    if not media_url:
+        return None
+    if str(media_url).startswith("/"):
+        media_url = f"{base_url.rstrip('/')}{media_url}"
+
+    with urllib.request.urlopen(str(media_url), timeout=35) as response:
+        payload = response.read(80 * 1024 * 1024 + 1)
+    if len(payload) > 80 * 1024 * 1024:
+        raise RuntimeError("Image download exceeded the 80 MB safety limit.")
+    frame = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)
+    return frame
+
+
+def _save_detection_status(event: dict[str, Any], payload: dict[str, Any]) -> None:
+    """Persist detection outcome inside the existing AI_QUALITY metadata (no DB migration needed)."""
+    metrics = dict(event.get("quality_metrics") or {})
+    metrics["object_detection"] = payload
+    notes = "AI_QUALITY:" + json.dumps(metrics, separators=(",", ":"), ensure_ascii=True)
+    update_event_status(
+        str(event.get("event_id")),
+        status=str(event.get("status") or "COMPLETE"),
+        notes=notes,
+    )
+
 def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, media_type: str, date_str: str) -> None:
     """Runs immediately after original capture/recording is finalized:
     1. Sets event to ENHANCEMENT_PROCESSING
@@ -486,17 +652,37 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
                 print(f"[AI Pipeline] Image enhancement failed for {event_id}: {res.get('error', 'unknown error')}")
                 return
 
-            # Compute detections without mutating the database yet. During legacy
-            # reprocessing, old results remain available until the new enhanced asset
-            # has been saved successfully.
+            # Try the enhanced image first, then retry on the untouched original if
+            # enhancement has removed or altered the visible cues for a target.
             pending_detections: list[dict[str, Any]] = []
-            img_bgr = cv2.imread(str(enhanced_local_path))
-            if img_bgr is not None:
-                try:
-                    det_res = ENGINE.infer(img_bgr, conf=0.22, already_enhanced=True)
-                    pending_detections = det_res.get("detections", [])
-                except Exception as det_err:
-                    print(f"[AI Detection] Notice: Vision detection non-fatal skip ({det_err})")
+            detection_result: dict[str, Any] = {
+                "status": "FAILED", "error": "Image could not be decoded for object detection.",
+                "detections": [], "count": 0,
+            }
+            detection_source = "NONE"
+            detection_sources_checked: list[str] = []
+            try:
+                img_bgr = cv2.imread(str(enhanced_local_path), cv2.IMREAD_COLOR)
+                original_bgr = cv2.imread(str(orig_path), cv2.IMREAD_COLOR)
+                detection_result, detection_source, detection_sources_checked = _run_object_detection_with_fallback(
+                    img_bgr, original_bgr
+                )
+                if detection_result.get("status") == "COMPLETE":
+                    pending_detections = detection_result.get("detections", [])
+                else:
+                    print(
+                        f"[AI Detection] {detection_result.get('status')}: "
+                        f"{detection_result.get('error', 'detector unavailable')} for {event_id}"
+                    )
+            except Exception as det_err:
+                detection_result = {
+                    "status": "FAILED", "error": f"{type(det_err).__name__}: {det_err}",
+                    "detections": [], "count": 0,
+                }
+                print(f"[AI Detection] Notice: object detection failed non-fatally for {event_id}: {det_err}")
+            object_detection_status = _format_detection_status(
+                detection_result, detection_source, detection_sources_checked
+            )
 
             # Only publish an enhanced asset after its cloud upload succeeds.
             enhanced_uploaded = upload_to_supabase_storage(
@@ -512,15 +698,12 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
                 print(f"[AI Pipeline] Enhanced image upload failed for {event_id}; preserving original")
                 return
 
-            # Record ENHANCED media asset
-            # Replace earlier detection rows only after the enhanced asset is safely stored.
-            clear_detections_for_event(event_id)
-            for detection in pending_detections:
-                record_detection(
-                    event_id, detection["label"], detection["confidence"],
-                    detection["x1"], detection["y1"], detection["x2"], detection["y2"]
-                )
+            # Publish detections only after the enhanced media upload has succeeded.
+            # If the model is unavailable, retain earlier results rather than clearing them.
+            if detection_result.get("status") == "COMPLETE":
+                _store_object_detections(event_id, detection_result)
 
+            # Record ENHANCED media asset
             record_media_asset({
                 "id": f"med_{event_id}_enhanced",
                 "event_id": event_id,
@@ -578,6 +761,9 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
             })
 
         quality_metrics = res.get("quality_metrics") if isinstance(res, dict) else None
+        if media_type == "IMAGE":
+            quality_metrics = dict(quality_metrics or {})
+            quality_metrics["object_detection"] = object_detection_status
         quality_note = (
             "AI_QUALITY:" + json.dumps(quality_metrics, separators=(",", ":"), ensure_ascii=True)
             if quality_metrics else "AI enhancement completed; no quality sample was available."
@@ -957,6 +1143,80 @@ def complete_event(event_id: str):
     return jsonify({"status": "SUCCESS", "event_id": event_id})
 
 
+
+@app.post("/api/events/<event_id>/detect")
+def detect_event_objects(event_id: str):
+    """Analyze a stored still and return persisted labels/confidences/bounding boxes."""
+    event = get_event(event_id)
+    if not event:
+        return jsonify({"error": "Capture not found", "event_id": event_id}), 404
+    media_type = str(event.get("media_type") or "").upper()
+    if media_type == "VIDEO" or event.get("type") == "VIDEO_RECORDING":
+        return jsonify({
+            "error": "Still-image detection is available for image captures. Video frame analysis is not enabled here.",
+            "event_id": event_id,
+        }), 400
+
+    try:
+        base_url = request.host_url.rstrip("/")
+        enhanced_frame = _read_event_image(event, "enhanced", base_url)
+        original_frame = None
+        if enhanced_frame is None:
+            original_frame = _read_event_image(event, "original", base_url)
+
+        result, source, sources_checked = _run_object_detection_with_fallback(
+            enhanced_frame, original_frame
+        )
+        # If the enhanced asset exists but had no detections, the fallback routine needs
+        # the original pixels as well. Fetch them only in that case to keep normal scans fast.
+        if (
+            enhanced_frame is not None
+            and result.get("status") == "COMPLETE"
+            and int(result.get("count") or 0) == 0
+        ):
+            original_frame = _read_event_image(event, "original", base_url)
+            result, source, sources_checked = _run_object_detection_with_fallback(
+                enhanced_frame, original_frame
+            )
+
+        outcome = _format_detection_status(result, source, sources_checked)
+        stored_detections: list[dict[str, Any]] = []
+        if result.get("status") == "COMPLETE":
+            stored_detections = _store_object_detections(event_id, result)
+            event["detections"] = stored_detections
+        _save_detection_status(event, outcome)
+        log_system_event(
+            "INFO" if outcome["status"] in ("COMPLETE", "NO_DETECTIONS") else "WARNING",
+            "AI_DETECTION",
+            f"Object scan for {event_id}: {outcome['status']} ({outcome['count']} detection(s))",
+        )
+        return jsonify({
+            "event_id": event_id,
+            "detection_status": outcome,
+            "detections": stored_detections if result.get("status") == "COMPLETE" else event.get("detections", []),
+        })
+    except Exception as exc:
+        failure = {
+            "status": "FAILED",
+            "count": 0,
+            "model": Path(ENGINE.model_path).name,
+            "source": "UNKNOWN",
+            "sources_checked": [],
+            "message": "Could not complete object detection for this capture.",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+        try:
+            _save_detection_status(event, failure)
+        except Exception:
+            pass
+        log_system_event("ERROR", "AI_DETECTION", f"Object scan failed for {event_id}: {type(exc).__name__}: {exc}")
+        return jsonify({
+            "event_id": event_id,
+            "detection_status": failure,
+            "error": failure["message"],
+        }), 500
+
+
 @app.delete("/api/events/<event_id>")
 def delete_single_event_route(event_id: str):
     success = delete_event(event_id)
@@ -1295,12 +1555,14 @@ def serve_local_media_fallback(filepath: str):
 @app.get("/api/ai/status")
 def ai_status():
     sr_status = get_super_resolution_status()
+    detector_status = ENGINE.status_payload()
     return jsonify({
         "status": "ONLINE",
         "enhancement_pipeline": "Real-ESRGAN general x4v3 ONNX — learned restoration and 4K super-resolution",
-        "detection_engine": "YOLOv8n Perimeter Security",
+        "detection_engine": detector_status.get("model", "YOLOv8n"),
+        "object_detection": detector_status,
         "super_resolution": sr_status,
-        "is_ready": ENGINE.is_ready
+        "is_ready": bool(detector_status.get("available")),
     })
 
 
