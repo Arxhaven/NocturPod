@@ -19,3 +19,6 @@ ultralytics-opencv-headless>=8.3.0
 # The Pi OS gpiozero/lgpio system packages are recommended for the physical GPIO backend.
 gpiozero>=2.0.1
 lgpio>=0.2.2.0; platform_machine == "aarch64" or platform_machine == "armv7l"
+
+# CPU-only ONNX Runtime for tiled Real-ESRGAN x4 super-resolution.
+onnxruntime>=1.17.0,<2.0
