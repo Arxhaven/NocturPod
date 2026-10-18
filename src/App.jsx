@@ -23,7 +23,10 @@ import {
   triggerSnapshot, 
   toggleRecording,
   deleteEvent,
-  setLightMode
+  setLightMode,
+  applyCameraSettings,
+  setPirSettings,
+  setLightIntensity
 } from './services/api';
 import './App.css';
 
@@ -289,6 +292,41 @@ export default function App() {
     }
   };
 
+  // Save camera, PIR and illumination settings by queueing real commands for the Pi.
+  const handleSaveSettings = async ({ cameraSettings, pirSettings, lightingSettings }) => {
+    const operations = [
+      ['camera controls', () => applyCameraSettings(cameraSettings)],
+      ['PIR settings', () => setPirSettings(pirSettings)],
+      ['illumination mode', () => setLightMode(lightingSettings.mode)],
+    ];
+
+    // Binary/relay installations intentionally remain at full on/off. Only request
+    // dimming when the user chooses a level below 100%; actual support depends on Pi wiring.
+    if (Number(lightingSettings.white_intensity) < 100) {
+      operations.push(['white-light intensity', () => setLightIntensity('WHITE', lightingSettings.white_intensity)]);
+    }
+    if (Number(lightingSettings.night_intensity) < 100) {
+      operations.push(['night-light intensity', () => setLightIntensity('NIGHT', lightingSettings.night_intensity)]);
+    }
+
+    const results = await Promise.allSettled(operations.map(([, send]) => send()));
+    const failures = results
+      .map((result, index) => result.status === 'rejected' ? `${operations[index][0]}: ${result.reason?.message || 'request failed'}` : null)
+      .filter(Boolean);
+
+    if (failures.length) {
+      const message = `Some settings were not queued: ${failures.join('; ')}`;
+      showToast(message, true);
+      throw new Error(message);
+    }
+
+    const ids = results
+      .filter((result) => result.status === 'fulfilled')
+      .map((result) => result.value?.command_id)
+      .filter(Boolean);
+    showToast(`Settings queued for the Raspberry Pi (${ids.length} command(s)). Keep the edge agent online to apply them.`);
+  };
+
   // Delete event and associated media
   const handleDeleteEvent = async (eventId) => {
     try {
@@ -413,8 +451,9 @@ export default function App() {
           {activeTab === 'ai' && <AIScreen />}
 
           {activeTab === 'settings' && (
-            <SettingsScreen 
+            <SettingsScreen
               deviceStatus={deviceStatus}
+              onSaveSettings={handleSaveSettings}
             />
           )}
         </main>
