@@ -25,6 +25,7 @@ from flask import Flask, Response, jsonify, redirect, request, send_from_directo
 from flask_cors import CORS
 
 from backend.ai_engine import ENGINE, enhance_image, enhance_video
+from backend.super_resolution import clear_cached_session_error
 from backend.database import (
     ack_command,
     check_device_timeouts,
@@ -849,6 +850,9 @@ def reprocess_missing_media():
         return jsonify({"error": "Unauthorized device"}), 401
 
     try:
+        # A failed download/session is cached to avoid retrying every gallery poll.
+        # Explicit authenticated retry clears that cache so the model can be fetched again.
+        clear_cached_session_error()
         result = _queue_missing_media_backfill(request.host_url.rstrip("/"), force_failed=True)
         return jsonify({
             "status": "QUEUED",
