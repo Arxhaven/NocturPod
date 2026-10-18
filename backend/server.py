@@ -664,8 +664,8 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
     2. Runs AI enhancement model
     3. Saves separate ENHANCED media file
     4. Uploads ENHANCED asset to Supabase Storage
-    5. Records detections if image
-    6. Updates database event to COMPLETE
+    5. Publishes enhanced asset and marks the event COMPLETE
+    6. Runs image object detection as a post-enhancement best-effort step
     """
     try:
         update_event_status(event_id, status="ENHANCEMENT_PROCESSING", ai_status="PROCESSING")
