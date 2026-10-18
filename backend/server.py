@@ -5,6 +5,7 @@ Supabase PostgreSQL / Storage persistence.
 """
 from __future__ import annotations
 
+import base64
 import concurrent.futures
 import datetime
 import hashlib
@@ -1568,6 +1569,57 @@ def serve_local_media_fallback(filepath: str):
         "error": "Media is not available from Supabase and no local copy exists",
         "storage_path": filepath,
     }), 404
+
+
+
+@app.post("/api/ai/detect")
+def detect_uploaded_image():
+    """Run real object detection on a user-supplied still; never return synthetic results."""
+    uploaded = request.files.get("file") or request.files.get("image")
+    if uploaded is None:
+        return jsonify({"error": "Choose an image file to analyze."}), 400
+
+    payload = uploaded.read(30 * 1024 * 1024 + 1)
+    if not payload:
+        return jsonify({"error": "The uploaded image is empty."}), 400
+    if len(payload) > 30 * 1024 * 1024:
+        return jsonify({"error": "Image upload exceeds the 30 MB limit."}), 413
+
+    frame = cv2.imdecode(np.frombuffer(payload, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        return jsonify({"error": "The uploaded file could not be decoded as an image."}), 400
+
+    result = ENGINE.infer(frame, conf=0.22, already_enhanced=True, source="UPLOAD")
+    outcome = _format_detection_status(result, "UPLOAD", ["UPLOAD"])
+    if result.get("status") != "COMPLETE":
+        return jsonify({
+            "error": outcome.get("message"),
+            "detection_status": outcome,
+            "objects": [],
+            "count": 0,
+            "image_dimensions": result.get("image_dimensions"),
+            "simulated": False,
+        }), 503
+
+    annotated_image = None
+    annotated_bgr = result.get("annotated_bgr")
+    if annotated_bgr is not None:
+        ok, encoded = cv2.imencode(
+            ".jpg", annotated_bgr, [cv2.IMWRITE_JPEG_QUALITY, 88]
+        )
+        if ok:
+            annotated_image = "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
+
+    return jsonify({
+        "status": "COMPLETE",
+        "detection_status": outcome,
+        "objects": result.get("detections", []),
+        "count": result.get("count", 0),
+        "image_dimensions": result.get("image_dimensions"),
+        "model": result.get("model"),
+        "annotated_image": annotated_image,
+        "simulated": False,
+    })
 
 
 @app.get("/api/ai/status")
