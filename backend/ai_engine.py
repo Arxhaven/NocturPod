@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import time
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,38 @@ except ImportError:
 MODEL_PATH = os.getenv("MODEL_PATH", "yolov8n.pt")
 # COCO Perimeter classes: person(0), bicycle(1), car(2), motorcycle(3), bus(5), truck(7), cat(15), dog(16)
 DETECTION_CLASSES = [0, 1, 2, 3, 5, 7, 15, 16]
+
+
+
+def _transcode_browser_mp4(source_path: Path, output_path: Path) -> None:
+    """Encode an MP4 using H.264/yuv420p + faststart for browser playback and seeking."""
+    try:
+        import imageio_ffmpeg
+    except Exception as exc:
+        raise RuntimeError(
+            "imageio-ffmpeg is required to create browser-compatible H.264 video. "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
+
+    ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+    command = [
+        ffmpeg_exe,
+        "-hide_banner", "-loglevel", "error", "-y",
+        "-i", str(source_path),
+        "-map", "0:v:0",
+        "-an",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "22",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        str(output_path),
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0 or not output_path.is_file() or output_path.stat().st_size == 0:
+        detail = (result.stderr or result.stdout or "no ffmpeg diagnostic").strip()[-1200:]
+        output_path.unlink(missing_ok=True)
+        raise RuntimeError(f"H.264 encoding failed (exit {result.returncode}): {detail}")
 
 
 def _has_ir_color_cast(frame: np.ndarray) -> bool:
@@ -330,11 +363,16 @@ def enhance_video(input_path: str | Path, output_path: str | Path) -> dict[str, 
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 720
     output_width, output_height = target_4k_dimensions(width, height)
 
+    # OpenCV's mp4v output is not reliably playable in web browsers. Write an
+    # intermediate file, then re-encode it to H.264/yuv420p with faststart metadata.
+    raw_output_p = output_p.with_name(f"{output_p.stem}_opencv_raw.mp4")
+    raw_output_p.unlink(missing_ok=True)
+    output_p.unlink(missing_ok=True)
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    out = cv2.VideoWriter(str(output_p), fourcc, fps, (output_width, output_height))
+    out = cv2.VideoWriter(str(raw_output_p), fourcc, fps, (output_width, output_height))
     if not out.isOpened():
         cap.release()
-        return {"status": "FAILED", "error": "Could not initialize 4K video writer."}
+        return {"status": "FAILED", "error": "Could not initialize the intermediate 4K video writer."}
 
     processed_frames = 0
     quality_before: list[dict[str, float]] = []
@@ -366,6 +404,7 @@ def enhance_video(input_path: str | Path, output_path: str | Path) -> dict[str, 
         cap.release()
         out.release()
         try:
+            raw_output_p.unlink(missing_ok=True)
             output_p.unlink(missing_ok=True)
         except Exception:
             pass
@@ -380,8 +419,19 @@ def enhance_video(input_path: str | Path, output_path: str | Path) -> dict[str, 
     elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
     duration_sec = round(processed_frames / fps, 1) if fps > 0 else 0
 
-    if processed_frames == 0 or not output_p.exists() or output_p.stat().st_size == 0:
+    if processed_frames == 0 or not raw_output_p.exists() or raw_output_p.stat().st_size == 0:
+        raw_output_p.unlink(missing_ok=True)
         return {"status": "FAILED", "error": "Video contained no decodable frames."}
+
+    try:
+        _transcode_browser_mp4(raw_output_p, output_p)
+    except Exception as exc:
+        return {
+            "status": "FAILED",
+            "error": f"Browser-compatible H.264 video encoding failed; original preserved: {type(exc).__name__}: {exc}",
+        }
+    finally:
+        raw_output_p.unlink(missing_ok=True)
 
     def average_metrics(samples: list[dict[str, float]]) -> dict[str, float]:
         if not samples:
@@ -396,6 +446,8 @@ def enhance_video(input_path: str | Path, output_path: str | Path) -> dict[str, 
     quality_metrics = {
         "metric_type": "heuristic_visibility_index_not_accuracy",
         "enhancement_mode": "NOCTURPOD_REAL_ESRGAN_4K_V3",
+        "video_codec": "H.264 / AVC (yuv420p, faststart)",
+        "browser_playback_compatible": True,
         "upscaler": last_details.get("upscaler"),
         "model_sha256": last_details.get("model_sha256"),
         "resolution_before": f"{width}x{height}",
