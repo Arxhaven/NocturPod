@@ -281,6 +281,31 @@ export async function setLightIntensity(mode, intensityPct) {
 
 
 /**
+ * Runs real YOLO object detection against an existing stored image capture.
+ * The backend persists labels and normalized boxes so the viewer can draw them
+ * on either the original or enhanced rendition.
+ */
+export async function detectEventObjects(eventId) {
+  if (!eventId || typeof eventId !== 'string') {
+    throw new Error('A valid capture event ID is required for object detection.');
+  }
+  const res = await fetchWithTimeout(
+    buildApiUrl(`/api/events/${encodeURIComponent(eventId)}/detect`),
+    {
+      method: 'POST',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({}),
+    },
+    45000
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.detection_status?.message || data?.error || `Object detection failed (${res.status}).`);
+  }
+  return data;
+}
+
+/**
  * Fetches AI enhancement pipeline and vision model status.
  */
 export async function fetchAiStatus() {
@@ -402,11 +427,32 @@ export async function saveConfig(configData) {
   return configData;
 }
 
-export async function detectObjects() {
-  return [];
+export async function detectObjects(file) {
+  if (!file) {
+    throw new Error('Choose an image file before running object detection.');
+  }
+  const formData = new FormData();
+  formData.append('file', file, file.name || 'nocturpod-image.jpg');
+  const res = await fetchWithTimeout(buildApiUrl('/api/ai/detect'), {
+    method: 'POST',
+    headers: getAuthHeaders(),
+    body: formData,
+  }, 45000);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.detection_status?.message || data?.error || `Object detection failed (${res.status}).`);
+  }
+  return {
+    ...data,
+    objects: Array.isArray(data.objects) ? data.objects : [],
+    count: data.count ?? (Array.isArray(data.objects) ? data.objects.length : 0),
+    image_dimensions: data.image_dimensions || null,
+    simulated: false,
+  };
 }
 
-export async function detectImageAnnotated() {
-  return null;
+export async function detectImageAnnotated(file) {
+  const result = await detectObjects(file);
+  return result.annotated_image || null;
 }
 

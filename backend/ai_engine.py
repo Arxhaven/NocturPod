@@ -31,9 +31,17 @@ except ImportError:
     _YOLO_AVAILABLE = False
 
 
-MODEL_PATH = os.getenv("MODEL_PATH", "yolov8n.pt")
-# COCO Perimeter classes: person(0), bicycle(1), car(2), motorcycle(3), bus(5), truck(7), cat(15), dog(16)
-DETECTION_CLASSES = [0, 1, 2, 3, 5, 7, 15, 16]
+MODEL_PATH = os.getenv("NOCTURPOD_YOLO_MODEL_PATH", os.getenv("MODEL_PATH", "yolov8n.pt"))
+# By default run against all 80 classes in the standard COCO model. Deployments can
+# narrow the set with NOCTURPOD_DETECTION_CLASSES="0,2,3,5,7".
+_raw_detection_classes = os.getenv("NOCTURPOD_DETECTION_CLASSES", "").strip()
+try:
+    DETECTION_CLASSES: list[int] | None = (
+        [int(value.strip()) for value in _raw_detection_classes.split(",") if value.strip()]
+        if _raw_detection_classes else None
+    )
+except ValueError:
+    DETECTION_CLASSES = None
 
 
 
@@ -486,46 +494,93 @@ def enhance_video(input_path: str | Path, output_path: str | Path) -> dict[str, 
 
 
 class NocturPodAIEngine:
-    """Manages AI model loading and object detection inference on enhanced frames."""
+    """Loads YOLO lazily and reports real model/inference readiness."""
+
     def __init__(self, model_path: str = MODEL_PATH):
         self.model_path = model_path
         self._model = None
         self.is_ready = False
+        self.last_error: str | None = None
+        self.last_inference_status = "CHECKING"
+        self.last_inference_count = 0
+        self.last_inference_ms: float | None = None
+        self.last_inference_source: str | None = None
         if _YOLO_AVAILABLE:
             self._load_model()
+        else:
+            self.last_error = "Ultralytics is not installed in the backend runtime."
 
     def _load_model(self) -> None:
         try:
             self._model = YOLO(self.model_path)
             self.is_ready = True
-        except Exception as e:
-            print(f"[AI Engine] Notice: YOLO model ({self.model_path}) not loaded immediately: {e}")
+            self.last_error = None
+        except Exception as exc:
             self._model = None
             self.is_ready = False
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            print(f"[AI Engine] YOLO model ({self.model_path}) is unavailable: {self.last_error}")
 
-    def infer(self, image_bgr: np.ndarray, conf: float = 0.22, already_enhanced: bool = False) -> dict[str, Any]:
-        """Runs object detection on frame using the genuine classes from ai_model_source."""
+    def status_payload(self) -> dict[str, Any]:
+        """Return truthful detector status for the dashboard and health checks."""
+        return {
+            "available": bool(self.is_ready and self._model is not None),
+            "model": Path(self.model_path).name,
+            "class_scope": "all COCO classes" if DETECTION_CLASSES is None else DETECTION_CLASSES,
+            "last_inference_status": self.last_inference_status,
+            "last_inference_count": self.last_inference_count,
+            "last_inference_ms": self.last_inference_ms,
+            "last_inference_source": self.last_inference_source,
+            "error": self.last_error,
+            "note": (
+                "Detection confidence is a model score, not verified recognition accuracy. "
+                "Low-light, blur, occlusion, and distance can cause missed detections."
+            ),
+        }
+
+    def infer(
+        self,
+        image_bgr: np.ndarray,
+        conf: float = 0.22,
+        already_enhanced: bool = False,
+        source: str = "unknown",
+    ) -> dict[str, Any]:
+        """Detect COCO objects and return both pixel and normalized bounding boxes."""
         if image_bgr is None or image_bgr.size == 0:
-            return {"status": "FAILED", "detections": [], "count": 0}
+            self.last_inference_status = "FAILED"
+            self.last_error = "Empty image was supplied to object detection."
+            self.last_inference_count = 0
+            return {
+                "status": "FAILED",
+                "error": self.last_error,
+                "detections": [],
+                "count": 0,
+            }
 
-        # Avoid enhancing the same image twice in the ingestion pipeline.
+        # The ingestion path passes the already-restored image first. If it contains
+        # no candidates, the caller can cheaply retry on the untouched original image.
         enhanced = image_bgr if already_enhanced else enhance_frame(image_bgr)
 
         if not self.is_ready and _YOLO_AVAILABLE:
             self._load_model()
 
         if not self.is_ready or self._model is None:
+            message = self.last_error or "YOLO model is not ready."
+            self.last_inference_status = "UNAVAILABLE"
+            self.last_inference_count = 0
+            self.last_inference_source = source
             return {
-                "status": "SKIPPED",
+                "status": "UNAVAILABLE",
+                "error": message,
+                "model": Path(self.model_path).name,
                 "detections": [],
                 "count": 0,
-                "enhanced_bgr": enhanced
+                "image_dimensions": {"width": int(enhanced.shape[1]), "height": int(enhanced.shape[0])},
+                "enhanced_bgr": enhanced,
             }
 
         try:
-            # Low-light imagery needs a slightly more permissive detector threshold and
-            # larger inference size to improve recall for people at a distance. The
-            # returned confidence is still a model score, not a verified accuracy rate.
+            height, width = enhanced.shape[:2]
             gray_for_detection = cv2.cvtColor(enhanced, cv2.COLOR_BGR2GRAY)
             input_mean_luminance = float(np.mean(gray_for_detection))
             if input_mean_luminance < 70.0:
@@ -551,39 +606,66 @@ class NocturPodAIEngine:
             detections = []
             for box in results.boxes:
                 cls_id = int(box.cls[0])
-                name = results.names.get(cls_id, f"class_{cls_id}")
+                names = results.names
+                name = names.get(cls_id, f"class_{cls_id}") if isinstance(names, dict) else names[cls_id]
                 conf_val = round(float(box.conf[0]), 4)
-                xyxy = [round(float(v), 1) for v in box.xyxy[0].tolist()]
+                xyxy = [float(v) for v in box.xyxy[0].tolist()]
+                x1, y1, x2, y2 = xyxy
+                # A normalized box is stable across original/enhanced resolutions.
+                # The raw box remains available for diagnostics and annotated previews.
+                normalized_box = [
+                    round(float(np.clip(x1 / max(width, 1), 0.0, 1.0)), 6),
+                    round(float(np.clip(y1 / max(height, 1), 0.0, 1.0)), 6),
+                    round(float(np.clip(x2 / max(width, 1), 0.0, 1.0)), 6),
+                    round(float(np.clip(y2 / max(height, 1), 0.0, 1.0)), 6),
+                ]
                 detections.append({
-                    "label": name,
+                    "label": str(name),
                     "confidence": conf_val,
-                    "box": xyxy,
-                    "x1": xyxy[0],
-                    "y1": xyxy[1],
-                    "x2": xyxy[2],
-                    "y2": xyxy[3]
+                    "box": [round(v, 1) for v in xyxy],
+                    "normalized_box": normalized_box,
+                    "x1": round(x1, 1),
+                    "y1": round(y1, 1),
+                    "x2": round(x2, 1),
+                    "y2": round(y2, 1),
+                    "coordinates_normalized": True,
                 })
 
-            annotated_bgr = results.plot()
+            self.last_inference_status = "COMPLETE"
+            self.last_inference_count = len(detections)
+            self.last_inference_ms = elapsed_ms
+            self.last_inference_source = source
+            self.last_error = None
             return {
                 "status": "COMPLETE",
                 "detections": detections,
                 "count": len(detections),
+                "model": Path(self.model_path).name,
                 "processing_time_ms": elapsed_ms,
                 "confidence_threshold_used": effective_conf,
                 "inference_size": inference_size,
                 "input_mean_luminance": round(input_mean_luminance, 1),
-                "annotated_bgr": annotated_bgr,
-                "enhanced_bgr": enhanced
+                "image_dimensions": {"width": int(width), "height": int(height)},
+                "source": source,
+                "annotated_bgr": results.plot(),
+                "enhanced_bgr": enhanced,
             }
-        except Exception as ex:
+        except Exception as exc:
+            self.last_inference_status = "FAILED"
+            self.last_inference_count = 0
+            self.last_inference_ms = None
+            self.last_inference_source = source
+            self.last_error = f"{type(exc).__name__}: {exc}"
             return {
                 "status": "FAILED",
-                "error": str(ex),
+                "error": self.last_error,
+                "model": Path(self.model_path).name,
                 "detections": [],
                 "count": 0,
-                "enhanced_bgr": enhanced
+                "image_dimensions": {"width": int(enhanced.shape[1]), "height": int(enhanced.shape[0])},
+                "enhanced_bgr": enhanced,
             }
+
 
 
 # Singleton engine instance

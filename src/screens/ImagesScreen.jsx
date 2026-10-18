@@ -61,6 +61,8 @@ export default function ImagesScreen({ images = [], onSelectImage }) {
             const rawDisplayUrl = isEnhanced ? item.enhanced_url : (item.original_url || item.thumbnail);
             const displayUrl = resolveMediaUrl(rawDisplayUrl);
             const itemKey = String(item.event_id || item.id);
+            const itemDetections = Array.isArray(item.detections) ? item.detections : [];
+            const detectionStatus = item.detection_status?.status;
 
             return (
               <div 
@@ -91,6 +93,19 @@ export default function ImagesScreen({ images = [], onSelectImage }) {
                       <span>INSPECT STILL</span>
                     </span>
                   </div>
+                  {itemDetections.length > 0 ? (
+                    <span className="bbox-detected-badge mono" title={itemDetections.map((d) => d.label).filter(Boolean).join(', ')}>
+                      {itemDetections.length} OBJECT{itemDetections.length === 1 ? '' : 'S'}
+                    </span>
+                  ) : detectionStatus ? (
+                    <span className={`bbox-detected-badge mono ${detectionStatus === 'NO_DETECTIONS' ? 'no-objects' : 'detection-state'}`}>
+                      {detectionStatus === 'NO_DETECTIONS' ? 'NO OBJECTS' : detectionStatus.replaceAll('_', ' ')}
+                    </span>
+                  ) : (
+                    <span className="bbox-detected-badge mono scan-on-open" title="Object detection will run when this image is opened">
+                      SCAN ON OPEN
+                    </span>
+                  )}
 
                   <div className="img-overlay-top">
                     {isEnhanced ? (
