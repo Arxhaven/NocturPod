@@ -5,21 +5,21 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=pi
-Group=pi
-WorkingDirectory=/home/pi/NocturPod
-ExecStart=/home/pi/NocturPod/.venv/bin/python -u agent/main.py
-Restart=always
+User=arxshar
+Group=arxshar
+SupplementaryGroups=gpio
+WorkingDirectory=/home/arxshar/NocturPod
+ExecStart=/home/arxshar/NocturPod/.venv/bin/python -u agent/main.py
+Restart=on-failure
 RestartSec=5s
 Environment=PYTHONUNBUFFERED=1
-Environment=NOCTURPOD_DEVICE_ID=nocturpod-edge-01
-Environment=NOCTURPOD_BACKEND_URL=https://your-nocturpod-backend.onrender.com
-Environment=NOCTURPOD_DEVICE_TOKEN=nocturpod-sec-key-replace-with-secure-token
+Environment=GPIOZERO_PIN_FACTORY=lgpio
+EnvironmentFile=/etc/nocturpod-agent.env
 
-# Filesystem permissions
+# Permit writes only to the local media spool and the project storage directory.
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=/home/pi/nocturpod/media /home/pi/NocturPod/storage
+ReadWritePaths=/home/arxshar/nocturpod/media /home/arxshar/NocturPod/storage
 
 [Install]
 WantedBy=multi-user.target
