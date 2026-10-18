@@ -1,6 +1,6 @@
-"""NocturPod AI Low-Light Enhancement and Vision Inference Pipeline
-Integrates the genuine Adaptive CLAHE + Detail Sharpening enhancement algorithm
-from ai_model_source, along with YOLOv8 perimeter security detection.
+"""NocturPod learned low-light restoration, 4K super-resolution, and object detection.
+Uses tiled Real-ESRGAN general x4v3 ONNX for restoration/upscaling, conservative
+low-light tone normalization, and YOLOv8 perimeter security detection.
 
 Clean unified API:
 - enhance_image(input_path, output_path) -> dict
@@ -16,6 +16,12 @@ from typing import Any
 
 import cv2
 import numpy as np
+
+from backend.super_resolution import (
+    SuperResolutionUnavailable,
+    target_4k_dimensions,
+    upscale_to_4k,
+)
 
 try:
     from ultralytics import YOLO
@@ -156,68 +162,158 @@ def measure_visibility_index(frame: np.ndarray) -> dict[str, float]:
 
 
 def _compare_visibility(original: np.ndarray, enhanced: np.ndarray) -> dict[str, Any]:
+    """Compare at source dimensions; resolution changes alone must not inflate scores."""
+    if original is None or original.size == 0 or enhanced is None or enhanced.size == 0:
+        raise ValueError("Cannot compare empty source/enhanced frames.")
+    source_h, source_w = original.shape[:2]
+    if enhanced.shape[:2] != (source_h, source_w):
+        comparable = cv2.resize(enhanced, (source_w, source_h), interpolation=cv2.INTER_AREA)
+    else:
+        comparable = enhanced
+
     before = measure_visibility_index(original)
-    after = measure_visibility_index(enhanced)
+    after = measure_visibility_index(comparable)
     before_index = before["visibility_index"]
     after_index = after["visibility_index"]
     relative_change = round(((after_index - before_index) / max(before_index, 1.0)) * 100.0, 1)
-    ir_cast_detected = _has_ir_color_cast(original)
     return {
         "metric_type": "heuristic_visibility_index_not_accuracy",
         "before": before,
         "after": after,
         "relative_change_pct": relative_change,
-        "enhancement_mode": "IR_CAST_GRAYSCALE_CLAHE_V2" if ir_cast_detected else "NOISE_AWARE_CLAHE_V2",
-        "ir_color_cast_detected": ir_cast_detected,
-        "ir_color_cast_normalized": ir_cast_detected,
         "explanation": (
-            "Relative change in a heuristic visibility index based on exposure, contrast, "
-            "edge detail, estimated noise, and clipping. It is not a percentage of AI accuracy "
-            "or proof that a person is recognizable."
+            "Visibility Index is a heuristic based on exposure, contrast, edge detail, "
+            "noise and clipping, measured after resizing the enhanced output back to source "
+            "dimensions. It is not a percentage of AI accuracy or proof that a person is recognizable."
         ),
     }
 
 
-def enhance_frame(frame: np.ndarray) -> np.ndarray:
-    """Noise-aware low-light enhancement tuned to preserve recognizable edges."""
+def _prepare_low_light_frame(frame: np.ndarray) -> tuple[np.ndarray, bool, float]:
+    """Normalize strong IR colour casts and gently lift very dark input shadows."""
+    ir_cast_detected = _has_ir_color_cast(frame)
+    prepared = frame
+    if ir_cast_detected:
+        # Keep the original untouched; only the enhanced copy is normalized.
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        prepared = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+    gray_pre = cv2.cvtColor(prepared, cv2.COLOR_BGR2GRAY)
+    mean_luminance = float(np.mean(gray_pre))
+    # A restrained gamma lift helps the SR model see shadow detail without the heavy
+    # local-contrast boost that previously made sensor noise dominate the person.
+    gamma = 0.86 if mean_luminance < 55.0 else (0.92 if mean_luminance < 90.0 else 1.0)
+    if gamma != 1.0:
+        lut = np.array(
+            [np.clip(((index / 255.0) ** gamma) * 255.0, 0, 255) for index in range(256)],
+            dtype=np.uint8,
+        )
+        prepared = cv2.LUT(prepared, lut)
+    return prepared, ir_cast_detected, gamma
+
+
+def enhance_frame_with_details(frame: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
+    """Restore and upscale a BGR frame using Real-ESRGAN; output targets a 4K long edge."""
     if frame is None or frame.size == 0:
-        return frame
-    return apply_adaptive_clahe(frame)
+        raise ValueError("Cannot enhance an empty frame.")
+    prepared, ir_cast_detected, gamma = _prepare_low_light_frame(frame)
+
+    # Do not silently substitute CLAHE/Lanczos and call it AI super-resolution if
+    # the learned model is unavailable. The calling pipeline records a failed job
+    # while preserving the uploaded ORIGINAL for retry.
+    enhanced, upscale_details = upscale_to_4k(prepared)
+    source_h, source_w = frame.shape[:2]
+    output_h, output_w = enhanced.shape[:2]
+    expected_w, expected_h = target_4k_dimensions(source_w, source_h)
+    if (output_w, output_h) != (expected_w, expected_h):
+        raise SuperResolutionUnavailable(
+            f"Super-resolution output was {output_w}x{output_h}; expected {expected_w}x{expected_h}."
+        )
+
+    details = {
+        **upscale_details,
+        "enhancement_mode": "NOCTURPOD_REAL_ESRGAN_4K_V3",
+        "ir_color_cast_detected": ir_cast_detected,
+        "ir_color_cast_normalized": ir_cast_detected,
+        "shadow_gamma": gamma,
+        "resolution_before": f"{source_w}x{source_h}",
+        "resolution_after": f"{output_w}x{output_h}",
+        "explanation": (
+            "Real-ESRGAN x4 learned restoration/upscaling plus a restrained shadow lift. "
+            "The output is sized to a 3840-pixel long edge (4K UHD for 16:9 sources). "
+            "The learned model may infer plausible texture; it cannot guarantee that newly "
+            "generated facial or object detail is factually accurate."
+        ),
+    }
+    return enhanced, details
+
+
+def enhance_frame(frame: np.ndarray) -> np.ndarray:
+    """Return a learned super-resolved frame; never silently fall back to contrast-only output."""
+    enhanced, _details = enhance_frame_with_details(frame)
+    return enhanced
+
+
+def _quality_metrics_for_output(
+    original: np.ndarray,
+    enhanced: np.ndarray,
+    details: dict[str, Any],
+) -> dict[str, Any]:
+    metrics = _compare_visibility(original, enhanced)
+    metrics.update({
+        "enhancement_mode": details.get("enhancement_mode", "NOCTURPOD_REAL_ESRGAN_4K_V3"),
+        "upscaler": details.get("upscaler"),
+        "model_sha256": details.get("model_sha256"),
+        "resolution_before": details.get("resolution_before"),
+        "resolution_after": details.get("resolution_after") or details.get("output_target"),
+        "upscale_factor_effective": details.get("upscale_factor_effective"),
+        "super_resolution_used": bool(details.get("super_resolution_used")),
+        "ir_color_cast_detected": bool(details.get("ir_color_cast_detected")),
+        "ir_color_cast_normalized": bool(details.get("ir_color_cast_normalized")),
+        "shadow_gamma": details.get("shadow_gamma", 1.0),
+        "explanation": details.get("explanation", metrics["explanation"]),
+    })
+    return metrics
 
 
 def enhance_image(input_path: str | Path, output_path: str | Path) -> dict[str, Any]:
-    """Enhance still image from input_path and write to output_path.
-    Returns status and metrics.
-    """
+    """Enhance a still image with Real-ESRGAN and write a separate 4K-target output."""
     input_p = Path(input_path)
     output_p = Path(output_path)
     output_p.parent.mkdir(parents=True, exist_ok=True)
 
     start = time.perf_counter()
-    img = cv2.imread(str(input_p))
+    img = cv2.imread(str(input_p), cv2.IMREAD_COLOR)
     if img is None:
         return {"status": "FAILED", "error": f"Could not read input image: {input_path}"}
 
-    enhanced = enhance_frame(img)
+    try:
+        enhanced, details = enhance_frame_with_details(img)
+    except Exception as exc:
+        return {
+            "status": "FAILED",
+            "error": f"Real-ESRGAN enhancement failed; original preserved: {type(exc).__name__}: {exc}",
+        }
+
     write_ok = cv2.imwrite(str(output_p), enhanced, [cv2.IMWRITE_JPEG_QUALITY, 95])
     elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
     if not write_ok:
         return {"status": "FAILED", "error": f"Could not write enhanced image: {output_p}"}
 
+    output_h, output_w = enhanced.shape[:2]
     return {
         "status": "COMPLETE",
         "output_path": str(output_p),
         "processing_time_ms": elapsed_ms,
-        "resolution": f"{img.shape[1]}x{img.shape[0]}",
+        "resolution_before": f"{img.shape[1]}x{img.shape[0]}",
+        "resolution": f"{output_w}x{output_h}",
         "file_size_bytes": output_p.stat().st_size if output_p.exists() else 0,
-        "quality_metrics": _compare_visibility(img, enhanced),
+        "quality_metrics": _quality_metrics_for_output(img, enhanced, details),
     }
 
 
 def enhance_video(input_path: str | Path, output_path: str | Path) -> dict[str, Any]:
-    """Enhance video file frame-by-frame, preserving framerate and timing.
-    Extracts frames, applies the enhancement pipeline, and re-encodes to MP4.
-    """
+    """Apply the learned restoration model to each video frame and encode at 4K target size."""
     input_p = Path(input_path)
     output_p = Path(output_path)
     output_p.parent.mkdir(parents=True, exist_ok=True)
@@ -230,29 +326,51 @@ def enhance_video(input_path: str | Path, output_path: str | Path) -> dict[str, 
     fps = cap.get(cv2.CAP_PROP_FPS) or 24.0
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 1280
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 720
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+    output_width, output_height = target_4k_dimensions(width, height)
 
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    out = cv2.VideoWriter(str(output_p), fourcc, fps, (width, height))
+    out = cv2.VideoWriter(str(output_p), fourcc, fps, (output_width, output_height))
+    if not out.isOpened():
+        cap.release()
+        return {"status": "FAILED", "error": "Could not initialize 4K video writer."}
 
     processed_frames = 0
     quality_before: list[dict[str, float]] = []
     quality_after: list[dict[str, float]] = []
     ir_cast_sample_count = 0
     sample_interval = max(1, int(round(fps * 2.0)))
+    last_details: dict[str, Any] = {}
     try:
         while True:
             ret, frame = cap.read()
             if not ret or frame is None:
                 break
-            enhanced = enhance_frame(frame)
+            enhanced, details = enhance_frame_with_details(frame)
+            last_details = details
+            if enhanced.shape[1] != output_width or enhanced.shape[0] != output_height:
+                enhanced = cv2.resize(enhanced, (output_width, output_height), interpolation=cv2.INTER_AREA)
             out.write(enhanced)
+
             if processed_frames % sample_interval == 0:
                 quality_before.append(measure_visibility_index(frame))
-                quality_after.append(measure_visibility_index(enhanced))
-                if _has_ir_color_cast(frame):
+                source_sized_enhanced = cv2.resize(
+                    enhanced, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_AREA
+                )
+                quality_after.append(measure_visibility_index(source_sized_enhanced))
+                if details.get("ir_color_cast_detected"):
                     ir_cast_sample_count += 1
             processed_frames += 1
+    except Exception as exc:
+        cap.release()
+        out.release()
+        try:
+            output_p.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return {
+            "status": "FAILED",
+            "error": f"Real-ESRGAN video enhancement failed; original preserved: {type(exc).__name__}: {exc}",
+        }
     finally:
         cap.release()
         out.release()
@@ -275,7 +393,14 @@ def enhance_video(input_path: str | Path, output_path: str | Path) -> dict[str, 
     after_index = after_metrics.get("visibility_index", 0.0)
     quality_metrics = {
         "metric_type": "heuristic_visibility_index_not_accuracy",
-        "enhancement_mode": "AUTO_IR_CAST_GRAYSCALE_CLAHE_V2",
+        "enhancement_mode": "NOCTURPOD_REAL_ESRGAN_4K_V3",
+        "upscaler": last_details.get("upscaler"),
+        "model_sha256": last_details.get("model_sha256"),
+        "resolution_before": f"{width}x{height}",
+        "resolution_after": f"{output_width}x{output_height}",
+        "upscale_factor_effective": last_details.get("upscale_factor_effective"),
+        "super_resolution_used": bool(last_details.get("super_resolution_used")),
+        "shadow_gamma": last_details.get("shadow_gamma", 1.0),
         "sample_interval_seconds": 2,
         "sample_count": len(quality_before),
         "ir_cast_sample_count": ir_cast_sample_count,
@@ -286,9 +411,10 @@ def enhance_video(input_path: str | Path, output_path: str | Path) -> dict[str, 
         "after": after_metrics,
         "relative_change_pct": round(((after_index - before_index) / max(before_index, 1.0)) * 100.0, 1),
         "explanation": (
-            "Relative change in a heuristic visibility index sampled every two seconds. "
-            "It is not a percentage of AI accuracy or proof that a person is recognizable. "
-            "Red/purple IR colour casts are normalized to grayscale on affected frames."
+            "Visibility Index before/after is measured at the source frame dimensions. "
+            "The video output is upscaled to a 3840-pixel long edge. The percentage is a change "
+            "in a heuristic image-quality index, not object-recognition accuracy. Real-ESRGAN "
+            "can infer plausible detail but cannot guarantee that generated detail is factual."
         ),
     }
 
@@ -298,7 +424,8 @@ def enhance_video(input_path: str | Path, output_path: str | Path) -> dict[str, 
         "processing_time_ms": elapsed_ms,
         "processed_frames": processed_frames,
         "duration_sec": duration_sec,
-        "resolution": f"{width}x{height}",
+        "resolution_before": f"{width}x{height}",
+        "resolution": f"{output_width}x{output_height}",
         "file_size_bytes": output_p.stat().st_size,
         "quality_metrics": quality_metrics,
     }
