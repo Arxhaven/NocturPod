@@ -27,7 +27,11 @@ from flask import Flask, Response, jsonify, redirect, request, send_file, send_f
 from flask_cors import CORS
 
 from backend.ai_engine import ENGINE, enhance_image, enhance_video, _transcode_browser_mp4
-from backend.super_resolution import clear_cached_session_error, get_super_resolution_status
+from backend.super_resolution import (
+    clear_cached_session_error,
+    diagnose_super_resolution_model,
+    get_super_resolution_status,
+)
 from backend.database import (
     ack_command,
     check_device_timeouts,
@@ -1622,6 +1626,65 @@ def detect_uploaded_image():
         "annotated_image": annotated_image,
         "simulated": False,
     })
+
+
+
+@app.post("/api/ai/enhancement-diagnostics")
+def enhancement_diagnostics():
+    """Authenticated, nondestructive model self-test plus recent enhancement failures."""
+    if not verify_device_auth():
+        return jsonify({"error": "Unauthorized device"}), 401
+
+    model_test = diagnose_super_resolution_model()
+    recent_failures: list[dict[str, Any]] = []
+    try:
+        for event in list_events(limit=40, offset=0):
+            status = str(event.get("status") or "").upper()
+            ai_status_value = str(event.get("ai_status") or "").upper()
+            metrics = event.get("quality_metrics")
+            metrics = metrics if isinstance(metrics, dict) else {}
+            error = metrics.get("last_failed_enhancement_error")
+
+            # Older upload failures used human-readable notes rather than the
+            # structured AI_QUALITY marker. Retain only the useful diagnostic text.
+            notes = event.get("notes")
+            if not error and isinstance(notes, str) and "could not be saved to Supabase" in notes:
+                error = notes
+            failed = (
+                status == "ENHANCEMENT_FAILED"
+                or ai_status_value in ("FAILED", "ORIGINAL_PRESERVED")
+                or status in ("ENHANCEMENT_PROCESSING", "AI_BACKFILL_QUEUED")
+            )
+            if not failed:
+                continue
+            recent_failures.append({
+                "event_id": event.get("event_id"),
+                "type": event.get("type"),
+                "timestamp": event.get("timestamp"),
+                "status": status or "UNKNOWN",
+                "ai_status": ai_status_value or "UNKNOWN",
+                "processing_status": event.get("processing_status"),
+                "error": str(error)[:700] if error else None,
+            })
+            if len(recent_failures) >= 8:
+                break
+    except Exception as exc:
+        print(f"[AI Diagnostics] Could not read recent events: {type(exc).__name__}: {exc}")
+
+    return jsonify({
+        "status": "OK" if model_test.get("status") == "READY" else "FAILED",
+        "checked_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "super_resolution": model_test,
+        "storage": {
+            "supabase_configured": has_supabase_config(),
+            "media_directory_writable": os.access(str(MEDIA_DIR), os.W_OK),
+        },
+        "recent_enhancement_issues": recent_failures,
+        "notes": [
+            "The model probe uses a temporary 32x32 test frame and does not modify saved media.",
+            "A passing model probe verifies ONNX inference, not the separate Supabase upload path.",
+        ],
+    }), 200 if model_test.get("status") == "READY" else 503
 
 
 @app.get("/api/ai/status")
