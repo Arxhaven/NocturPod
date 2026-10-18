@@ -814,7 +814,7 @@ def _start_auto_backfill(base_url: str) -> None:
         _AUTO_BACKFILL_LAST_START = now
 
     def _run() -> None:
-        global _AUTO_BACKFILL_RUNNING
+        global _AUTO_BACKFILL_RUNNING, _AUTO_BACKFILL_LAST_START
         try:
             result = _queue_missing_media_backfill(base_url)
             print(
