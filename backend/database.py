@@ -643,12 +643,22 @@ def get_event(event_id: str) -> dict[str, Any] | None:
 
 
 def _attach_quality_metrics(event: dict[str, Any]) -> dict[str, Any]:
-    """Expose the explainable before/after quality proxy stored by the enhancement worker."""
+    """Expose metric JSON without flooding event timelines with a raw JSON payload."""
     notes = event.get("notes")
     if isinstance(notes, str) and notes.startswith("AI_QUALITY:"):
         try:
-            event["quality_metrics"] = json.loads(notes[len("AI_QUALITY:"):])
-        except (TypeError, ValueError):
+            metrics = json.loads(notes[len("AI_QUALITY:"):])
+            event["quality_metrics"] = metrics
+            before = (metrics.get("before") or {}).get("visibility_index")
+            after = (metrics.get("after") or {}).get("visibility_index")
+            delta = metrics.get("relative_change_pct")
+            if before is not None and after is not None and delta is not None:
+                sign = "+" if float(delta) > 0 else ""
+                event["notes"] = (
+                    f"Enhancement visibility index: {float(before):.1f} → {float(after):.1f}/100 "
+                    f"({sign}{float(delta):.1f}% relative; heuristic, not recognition accuracy)"
+                )
+        except (TypeError, ValueError, AttributeError):
             event["quality_metrics"] = None
     else:
         event["quality_metrics"] = None
