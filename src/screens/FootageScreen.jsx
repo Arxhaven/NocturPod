@@ -53,8 +53,10 @@ export default function FootageScreen({ footageList = [], onSelectVideo }) {
       ) : (
         <div className="footage-grid">
           {filtered.map((clip) => {
-            const isEnhanced = clip.processing_status === 'COMPLETE' && clip.enhanced_url;
-            const isProcessing = clip.processing_status === 'PROCESSING' || clip.processing_status === 'PENDING';
+            // An older enhanced asset remains usable if a newer enhancement attempt fails.
+            const isEnhanced = Boolean(clip.enhanced_url);
+            const isUpdateFailed = clip.status === 'ENHANCEMENT_FAILED' && isEnhanced;
+            const isProcessing = !isEnhanced && (clip.processing_status === 'PROCESSING' || clip.processing_status === 'PENDING');
 
             return (
               <div 
@@ -76,7 +78,12 @@ export default function FootageScreen({ footageList = [], onSelectVideo }) {
                   {clip.duration && <span className="duration-tag mono">{clip.duration}</span>}
 
                   <div className="footage-overlay-top">
-                    {isEnhanced ? (
+                    {isUpdateFailed ? (
+                      <span className="ai-status-pill original mono">
+                        <CheckCircle2 size={11} />
+                        <span>LAST ENHANCED KEPT</span>
+                      </span>
+                    ) : isEnhanced ? (
                       <span className="ai-status-pill complete mono">
                         <CheckCircle2 size={11} />
                         <span>AI ENHANCED</span>
