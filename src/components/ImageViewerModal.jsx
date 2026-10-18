@@ -41,8 +41,12 @@ export default function ImageViewerModal({ image, onClose, onDelete }) {
           <div className="viewer-title-group">
             <span className="viewer-id mono">{image.event_id || image.id}</span>
             <div className="viewer-status-indicator">
-              {isEnhancedReady ? (
-                <span className="tag-complete mono"><CheckCircle2 size={13} /> ENHANCED</span>
+              {image.status === 'ENHANCEMENT_FAILED' ? (
+                <span className="tag-original mono">
+                  {enhancedUrl ? 'UPDATE FAILED · LAST VERSION KEPT' : 'ENHANCEMENT FAILED'}
+                </span>
+              ) : isEnhancedReady ? (
+                <span className="tag-complete mono"><CheckCircle2 size={13} /> ENHANCED · 4K TARGET</span>
               ) : isEnhancing ? (
                 <span className="tag-processing mono"><Clock size={13} /> ENHANCING...</span>
               ) : (
