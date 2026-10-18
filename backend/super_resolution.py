@@ -341,7 +341,7 @@ def diagnose_super_resolution_model() -> dict[str, Any]:
             "inference_probe": "PASSED",
             "input_size": "32x32",
             "output_size": "128x128",
-            "providers": session.get_providers(),
+            "providers": session.get_providers() if callable(getattr(session, "get_providers", None)) else [],
             "duration_ms": round((time.perf_counter() - started) * 1000, 1),
             "error": None,
         }
