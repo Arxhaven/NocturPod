@@ -299,3 +299,29 @@ def clear_cached_session_error() -> None:
     with _SESSION_LOCK:
         _SESSION_ERROR = None
         _SESSION_MODEL_PATH = None
+
+
+def get_super_resolution_status() -> dict[str, Any]:
+    """Report model state without forcing a network download during a health check."""
+    path, custom_path = _model_path()
+    with _SESSION_LOCK:
+        loaded = _SESSION is not None and _SESSION_MODEL_PATH == str(path)
+        error = _SESSION_ERROR if _SESSION_MODEL_PATH == str(path) else None
+    file_sha = None
+    if path.is_file():
+        try:
+            file_sha = _sha256_file(path)
+        except Exception:
+            file_sha = None
+    return {
+        "model": MODEL_NAME,
+        "runtime": "ONNX Runtime CPU",
+        "state": "READY" if loaded else ("FAILED" if error else "NOT_LOADED"),
+        "loaded": loaded,
+        "model_file_present": path.is_file(),
+        "custom_model_path_configured": custom_path,
+        "model_sha256": file_sha,
+        "target_long_edge": TARGET_LONG_EDGE,
+        "tile_size": TILE_SIZE,
+        "error": error,
+    }
