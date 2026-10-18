@@ -439,7 +439,12 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
         if media_type == "IMAGE":
             res = enhance_image(orig_path, enhanced_local_path)
             if res.get("status") != "COMPLETE":
-                update_event_status(event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED", notes=res.get("error"))
+                update_event_status(event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED")
+                log_system_event(
+                    "ERROR", "AI_ENGINE",
+                    f"Image enhancement failed for {event_id}; original preserved: {res.get('error', 'unknown error')}"
+                )
+                print(f"[AI Pipeline] Image enhancement failed for {event_id}: {res.get('error', 'unknown error')}")
                 return
 
             # Compute detections without mutating the database yet. During legacy
@@ -495,7 +500,12 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
             # Video enhancement
             res = enhance_video(orig_path, enhanced_local_path)
             if res.get("status") != "COMPLETE":
-                update_event_status(event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED", notes=res.get("error"))
+                update_event_status(event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED")
+                log_system_event(
+                    "ERROR", "AI_ENGINE",
+                    f"Video enhancement failed for {event_id}; original preserved: {res.get('error', 'unknown error')}"
+                )
+                print(f"[AI Pipeline] Video enhancement failed for {event_id}: {res.get('error', 'unknown error')}")
                 return
 
             enhanced_uploaded = upload_to_supabase_storage(
@@ -537,7 +547,13 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
 
     except Exception as ex:
         print(f"[AI Pipeline] Enhancement error for {event_id}: {ex}")
-        update_event_status(event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED", notes=str(ex))
+        log_system_event(
+            "ERROR", "AI_ENGINE",
+            f"Enhancement error for {event_id}; original preserved: {type(ex).__name__}: {ex}"
+        )
+        # Keep the last known successful AI_QUALITY note intact when updating
+        # an older event; diagnostic errors belong in system_logs.
+        update_event_status(event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED")
 
 
 # --------------------------------------------------------------------------
@@ -699,11 +715,10 @@ def _reprocess_existing_media_worker(
     except Exception as exc:
         print(f"[AI Backfill] Failed to reprocess legacy event {event_id}: {type(exc).__name__}: {exc}")
         try:
-            update_event_status(
-                event_id,
-                status="ENHANCEMENT_FAILED",
-                ai_status="FAILED",
-                notes=f"Legacy enhancement backfill failed: {type(exc).__name__}"
+            update_event_status(event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED")
+            log_system_event(
+                "ERROR", "AI_BACKFILL",
+                f"Legacy enhancement backfill failed for {event_id}: {type(exc).__name__}: {exc}"
             )
         except Exception:
             pass
