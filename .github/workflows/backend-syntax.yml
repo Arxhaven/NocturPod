@@ -74,6 +74,19 @@ jobs:
                   "object_detection_available": (status.get("object_detection") or {}).get("available"),
               }, indent=2))
 
+              try:
+                  device = read_json("/api/device/status")
+                  print("PRODUCTION_DEVICE_STATUS")
+                  print(json.dumps({
+                      "status": device.get("status"),
+                      "camera_status": device.get("camera_status"),
+                      "wifi_status": device.get("wifi_status"),
+                      "last_seen": device.get("last_seen") or device.get("updated_at"),
+                      "software_version": device.get("software_version"),
+                  }, indent=2))
+              except Exception as exc:
+                  print(f"Could not read device status: {type(exc).__name__}: {exc}")
+
               media = []
               for endpoint, kind in (("/api/media/images", "IMAGE"), ("/api/media/footage", "VIDEO")):
                   try:
@@ -100,6 +113,7 @@ jobs:
                   summary.append({
                       "event_id": item.get("event_id") or item.get("id"),
                       "kind": item.get("_diagnostic_kind"),
+                      "timestamp": item.get("timestamp"),
                       "status": item.get("status"),
                       "ai_status": item.get("ai_status"),
                       "processing_status": item.get("processing_status"),
