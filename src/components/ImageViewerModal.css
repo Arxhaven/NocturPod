@@ -276,3 +276,20 @@
     gap: 8px;
   }
 }
+
+.viewer-meta-strip {
+  min-height: 58px;
+  height: auto;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  gap: 14px 24px;
+  flex-wrap: wrap;
+}
+.quality-disclaimer {
+  padding: 6px 24px 8px;
+  border-top: 1px solid var(--border-muted);
+  color: var(--color-muted-sage);
+  background: rgba(5, 31, 32, 0.75);
+  font-size: 9px;
+  line-height: 1.5;
+}
