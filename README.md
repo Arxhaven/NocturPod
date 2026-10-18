@@ -73,28 +73,43 @@ NOCTURPOD_DEVICE_ID=nocturpod-edge-01
 
 ## 4. Raspberry Pi Deployment & Auto-Start
 
-1. Clone NocturPod onto the Raspberry Pi:
+1. Install the Raspberry Pi OS hardware packages first. Use a virtual environment that can see the OS-provided Picamera2, OpenCV, GPIO Zero and lgpio libraries:
    ```bash
+   sudo apt update
+   sudo apt install -y python3-venv python3-picamera2 python3-opencv python3-numpy python3-psutil python3-requests python3-gpiozero python3-lgpio
    git clone https://github.com/Arxhaven/NocturPod.git ~/NocturPod
    cd ~/NocturPod
-   python3 -m venv .venv
+   python3 -m venv --system-site-packages .venv
    source .venv/bin/activate
-   pip install -r requirements.txt
+   pip install -r agent/requirements-pi.txt
    ```
 
-2. Install systemd service for automatic boot:
+2. Create a protected environment file with the actual production backend URL and the same device token used by Railway. Do not commit this file or put the token in Git:
+   ```bash
+   sudo nano /etc/nocturpod-agent.env
+   ```
+   Add these values, replacing the token placeholder:
+   ```ini
+   NOCTURPOD_BACKEND_URL=https://nocturpod-production.up.railway.app
+   NOCTURPOD_DEVICE_ID=nocturpod-edge-01
+   NOCTURPOD_DEVICE_TOKEN=PASTE_YOUR_EXISTING_DEVICE_TOKEN
+   GPIOZERO_PIN_FACTORY=lgpio
+   ```
+   Then protect the secret:
+   ```bash
+   sudo chown root:root /etc/nocturpod-agent.env
+   sudo chmod 600 /etc/nocturpod-agent.env
+   ```
+
+3. Install and start the systemd service:
    ```bash
    sudo cp agent/nocturpod-agent.service /etc/systemd/system/
    sudo systemctl daemon-reload
-   sudo systemctl enable nocturpod-agent.service
-   sudo systemctl start nocturpod-agent.service
-   ```
-
-3. Check agent status:
-   ```bash
+   sudo systemctl enable --now nocturpod-agent.service
    sudo systemctl status nocturpod-agent.service
    journalctl -u nocturpod-agent.service -f
    ```
+   The checked-in service targets the existing `arxshar` account and `/home/arxshar/NocturPod` path used in your setup. If your Pi installation uses a different account or clone path, update those fields before starting the service.
 
 ### PIR sensor wiring and diagnostics
 
@@ -104,16 +119,15 @@ The HC-SR501 PIR interface uses **BCM GPIO 17 (physical pin 11)** by default:
 - PIR OUT -> BCM GPIO 17 / physical pin 11. Raspberry Pi GPIO must never receive 5V logic.
 - Allow the PIR to warm up/calibrate after boot. The agent listens for real gpiozero motion edges and applies a software cooldown before taking another still.
 
-Install GPIO packages for the Raspberry Pi environment, then restart the agent:
+For a direct sensor test, stop the daemon first so it does not hold the same GPIO line:
 ```bash
-sudo apt update
-sudo apt install -y python3-gpiozero python3-lgpio
+sudo systemctl stop nocturpod-agent.service
 source .venv/bin/activate
-pip install -r requirements.txt
-sudo systemctl restart nocturpod-agent.service
+python -m agent.pir_diagnostic --pin 17 --calibration 30 --duration 90
+sudo systemctl start nocturpod-agent.service
 journalctl -u nocturpod-agent.service -f
 ```
-The runtime log must report that the HC-SR501 initialized on GPIO 17. If it reports a GPIO initialization failure, motion capture is **not** active; check wiring, pin conflicts, and the GPIO pin factory.
+The test reports each real motion/no-motion edge. The agent itself uses an explicit lgpio factory when available and has a watchdog poll path in case a gpiozero callback edge is missed. The runtime log must report the HC-SR501 initialized on GPIO 17. If the diagnostic never observes motion, check the sensor's VCC/GND/OUT wiring, warm-up time, sensitivity/time-delay potentiometers, jumper mode, and GPIO permissions. GPIO 17 must never receive 5V logic.
 
 ### Camera and illumination controls
 
