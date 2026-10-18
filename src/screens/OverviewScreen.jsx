@@ -5,12 +5,10 @@ import {
   ArrowUpRight,
   Camera,
   Clock3,
-  Cpu,
   Database,
   Film,
   HardDrive,
   Thermometer,
-  Wifi
 } from 'lucide-react';
 import './OverviewScreen.css';
 
