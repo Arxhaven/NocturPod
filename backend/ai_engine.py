@@ -78,8 +78,12 @@ def apply_adaptive_clahe(frame: np.ndarray, base_clip: float | None = None) -> n
 
     # A light, edge-preserving luminance denoise plus a 3x3 chroma median suppresses
     # the red/purple sensor speckles visible in the provided gallery screenshot.
+    raw_luma = float(np.mean(l_channel))
+    # Use stronger denoising only for very dark captures, where sensor grain would
+    # otherwise be exaggerated by local contrast. Keep brighter scenes sharper.
+    denoise_strength = 7.0 if raw_luma < 55 else (5.5 if raw_luma < 100 else 3.5)
     l_denoised = cv2.fastNlMeansDenoising(
-        l_channel, None, h=4.0, templateWindowSize=7, searchWindowSize=15
+        l_channel, None, h=denoise_strength, templateWindowSize=7, searchWindowSize=15
     )
     a_denoised = cv2.medianBlur(a_channel, 3)
     b_denoised = cv2.medianBlur(b_channel, 3)
@@ -234,6 +238,7 @@ def enhance_video(input_path: str | Path, output_path: str | Path) -> dict[str, 
     processed_frames = 0
     quality_before: list[dict[str, float]] = []
     quality_after: list[dict[str, float]] = []
+    ir_cast_sample_count = 0
     sample_interval = max(1, int(round(fps * 2.0)))
     try:
         while True:
@@ -245,6 +250,8 @@ def enhance_video(input_path: str | Path, output_path: str | Path) -> dict[str, 
             if processed_frames % sample_interval == 0:
                 quality_before.append(measure_visibility_index(frame))
                 quality_after.append(measure_visibility_index(enhanced))
+                if _has_ir_color_cast(frame):
+                    ir_cast_sample_count += 1
             processed_frames += 1
     finally:
         cap.release()
@@ -268,14 +275,20 @@ def enhance_video(input_path: str | Path, output_path: str | Path) -> dict[str, 
     after_index = after_metrics.get("visibility_index", 0.0)
     quality_metrics = {
         "metric_type": "heuristic_visibility_index_not_accuracy",
+        "enhancement_mode": "AUTO_IR_CAST_GRAYSCALE_CLAHE_V2",
         "sample_interval_seconds": 2,
         "sample_count": len(quality_before),
+        "ir_cast_sample_count": ir_cast_sample_count,
+        "ir_cast_sample_pct": round((ir_cast_sample_count / max(len(quality_before), 1)) * 100.0, 1),
+        "ir_color_cast_detected": ir_cast_sample_count > 0,
+        "ir_color_cast_normalized": ir_cast_sample_count > 0,
         "before": before_metrics,
         "after": after_metrics,
         "relative_change_pct": round(((after_index - before_index) / max(before_index, 1.0)) * 100.0, 1),
         "explanation": (
             "Relative change in a heuristic visibility index sampled every two seconds. "
-            "It is not a percentage of AI accuracy or proof that a person is recognizable."
+            "It is not a percentage of AI accuracy or proof that a person is recognizable. "
+            "Red/purple IR colour casts are normalized to grayscale on affected frames."
         ),
     }
 
