@@ -1071,10 +1071,15 @@ def _ensure_browser_video_asset(event_id: str, variant: str) -> tuple[str | None
                 local_source = MEDIA_DIR / Path(source_path).name
                 if local_source.is_file():
                     input_path = local_source
-                elif source_url.startswith(("https://", "http://")):
+                elif source_url.startswith(("https://", "http://", "/")):
                     extension = Path(source_path).suffix.lower()
                     if extension not in (".mp4", ".mov", ".mkv", ".avi", ".m4v"):
                         extension = ".mp4"
+                    source_fetch_url = (
+                        request.host_url.rstrip("/") + source_url
+                        if source_url.startswith("/")
+                        else source_url
+                    )
                     with tempfile.NamedTemporaryFile(
                         prefix=f"{safe_id}_{variant.lower()}_source_",
                         suffix=extension,
@@ -1082,7 +1087,7 @@ def _ensure_browser_video_asset(event_id: str, variant: str) -> tuple[str | None
                         delete=False,
                     ) as temp:
                         temp_input = Path(temp.name)
-                        with urllib.request.urlopen(source_url, timeout=60) as response:
+                        with urllib.request.urlopen(source_fetch_url, timeout=60) as response:
                             shutil.copyfileobj(response, temp)
                     input_path = temp_input
                 else:
@@ -1185,10 +1190,10 @@ def download_event_media(event_id: str, variant: str):
     safe_event = _safe_media_identifier(event_id) or "nocturpod-video"
     download_name = f"nocturpod-{safe_event}-{variant.lower()}{Path(source_filename).suffix or '.mp4'}"
 
-    if media_url.startswith(("https://", "http://")):
+    if media_url.startswith(("https://", "http://", "/")):
         # Supabase Storage supports a download query parameter on signed object URLs.
-        # This ensures cross-origin links return Content-Disposition: attachment instead
-        # of depending on the HTML 'download' attribute, which browsers may ignore.
+        # If signing was temporarily unavailable, the same parameter is carried through
+        # the local fallback route and applied after it obtains a fresh signed URL.
         parsed = urllib.parse.urlsplit(media_url)
         query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
         query = [(key, value) for key, value in query if key.lower() != "download"]
@@ -1240,7 +1245,17 @@ def serve_local_media_fallback(filepath: str):
     # keeps image/video delivery out of the Flask worker and supports byte-range
     # requests directly against Supabase Storage.
     signed_url = get_signed_storage_url(filepath)
+    download_name = request.args.get("download")
     if signed_url and signed_url.startswith(("https://", "http://")):
+        if download_name:
+            parsed = urllib.parse.urlsplit(signed_url)
+            query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+            query = [(key, value) for key, value in query if key.lower() != "download"]
+            query.append(("download", download_name))
+            signed_url = urllib.parse.urlunsplit((
+                parsed.scheme, parsed.netloc, parsed.path,
+                urllib.parse.urlencode(query), parsed.fragment
+            ))
         return redirect(signed_url, code=302)
 
     # Preserve the local fallback for development or a file uploaded in this
@@ -1248,7 +1263,13 @@ def serve_local_media_fallback(filepath: str):
     filename = Path(filepath).name
     local_path = MEDIA_DIR / filename
     if local_path.is_file():
-        return send_from_directory(str(MEDIA_DIR), filename)
+        return send_from_directory(
+            str(MEDIA_DIR),
+            filename,
+            as_attachment=bool(download_name),
+            download_name=download_name or filename,
+            conditional=True,
+        )
 
     return jsonify({
         "error": "Media is not available from Supabase and no local copy exists",
