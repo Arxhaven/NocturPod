@@ -1160,24 +1160,42 @@ def detect_event_objects(event_id: str):
     try:
         base_url = request.host_url.rstrip("/")
         enhanced_frame = _read_event_image(event, "enhanced", base_url)
-        original_frame = None
-        if enhanced_frame is None:
-            original_frame = _read_event_image(event, "original", base_url)
+        sources_checked: list[str] = []
 
-        result, source, sources_checked = _run_object_detection_with_fallback(
-            enhanced_frame, original_frame
-        )
-        # If the enhanced asset exists but had no detections, the fallback routine needs
-        # the original pixels as well. Fetch them only in that case to keep normal scans fast.
-        if (
-            enhanced_frame is not None
-            and result.get("status") == "COMPLETE"
-            and int(result.get("count") or 0) == 0
-        ):
-            original_frame = _read_event_image(event, "original", base_url)
-            result, source, sources_checked = _run_object_detection_with_fallback(
-                enhanced_frame, original_frame
+        if enhanced_frame is not None:
+            # Run the 4K/enhanced still once. Only download and scan the original if
+            # the first pass completed but returned no candidate boxes.
+            result = ENGINE.infer(
+                enhanced_frame, conf=0.22, already_enhanced=True, source="ENHANCED"
             )
+            source = "ENHANCED"
+            sources_checked.append("ENHANCED")
+            if result.get("status") == "COMPLETE" and int(result.get("count") or 0) == 0:
+                original_frame = _read_event_image(event, "original", base_url)
+                if original_frame is not None:
+                    original_result = ENGINE.infer(
+                        original_frame, conf=0.18, already_enhanced=True, source="ORIGINAL"
+                    )
+                    sources_checked.append("ORIGINAL")
+                    if original_result.get("status") == "COMPLETE" and int(original_result.get("count") or 0) > 0:
+                        result = original_result
+                        source = "ORIGINAL"
+        else:
+            original_frame = _read_event_image(event, "original", base_url)
+            if original_frame is not None:
+                result = ENGINE.infer(
+                    original_frame, conf=0.18, already_enhanced=True, source="ORIGINAL"
+                )
+                source = "ORIGINAL"
+                sources_checked.append("ORIGINAL")
+            else:
+                result = {
+                    "status": "FAILED",
+                    "error": "No readable original or enhanced image was found for this event.",
+                    "detections": [],
+                    "count": 0,
+                }
+                source = "NONE"
 
         outcome = _format_detection_status(result, source, sources_checked)
         stored_detections: list[dict[str, Any]] = []
