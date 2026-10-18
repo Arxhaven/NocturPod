@@ -210,6 +210,7 @@ export default function ImageViewerModal({ image, onClose, onDelete, onDetection
         <div className="viewer-canvas">
           <div className="media-stage">
             {activeDisplayUrl && !failedUrls[activeDisplayUrl] ? (
+              <>
               <img
                 src={activeDisplayUrl}
                 alt={image.event_id || 'NocturPod Capture'}
@@ -253,6 +254,7 @@ export default function ImageViewerModal({ image, onClose, onDelete, onDetection
                   })}
                 </svg>
               )}
+              </>
             ) : (
               <div className="no-media-box mono">
                 <AlertCircle size={28} />
