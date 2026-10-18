@@ -96,6 +96,33 @@ NOCTURPOD_DEVICE_ID=nocturpod-edge-01
    journalctl -u nocturpod-agent.service -f
    ```
 
+### PIR sensor wiring and diagnostics
+
+The HC-SR501 PIR interface uses **BCM GPIO 17 (physical pin 11)** by default:
+- PIR VCC -> the supply voltage supported by your exact sensor board (check its markings/specification).
+- PIR GND -> Raspberry Pi GND (common ground is required).
+- PIR OUT -> BCM GPIO 17 / physical pin 11. Raspberry Pi GPIO must never receive 5V logic.
+- Allow the PIR to warm up/calibrate after boot. The agent listens for real gpiozero motion edges and applies a software cooldown before taking another still.
+
+Install GPIO packages for the Raspberry Pi environment, then restart the agent:
+```bash
+sudo apt update
+sudo apt install -y python3-gpiozero python3-lgpio
+source .venv/bin/activate
+pip install -r requirements.txt
+sudo systemctl restart nocturpod-agent.service
+journalctl -u nocturpod-agent.service -f
+```
+The runtime log must report that the HC-SR501 initialized on GPIO 17. If it reports a GPIO initialization failure, motion capture is **not** active; check wiring, pin conflicts, and the GPIO pin factory.
+
+### Camera and illumination controls
+
+The dashboard Settings panel can queue OV5647/libcamera controls for exposure, analogue gain, auto white balance, brightness, contrast, saturation, and sharpness. Manual exposure and analogue gain are used only when automatic exposure is disabled. Driver support varies; the Pi agent logs unsupported controls instead of pretending they changed.
+
+Set saturation to 0 for grayscale images if IR illumination creates strong red/purple color casts. Software cannot change the actual wavelength of physical IR LEDs. Dimming requires the illumination outputs to be connected to **PWM-compatible LED drivers**; only then set `LIGHT_PWM_ENABLED=1` in the Pi service environment. Do not enable PWM if the GPIOs control mechanical relays.
+
+The AUTO illumination mode uses average luminance measured from real camera frames with hysteresis to switch between WHITE and NIGHT. It is a camera-frame estimate rather than a dedicated lux sensor.
+
 ---
 
 ## 5. Local Development & Verification
