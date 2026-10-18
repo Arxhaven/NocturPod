@@ -478,6 +478,7 @@ export default function App() {
           image={selectedImage}
           onClose={() => setSelectedImage(null)}
           onDelete={handleDeleteEvent}
+          onDetectionComplete={refreshMedia}
         />
       )}
 
