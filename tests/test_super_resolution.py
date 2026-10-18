@@ -27,6 +27,13 @@ class FakeX4Session:
 
 
 class TestNocturPodSuperResolution(unittest.TestCase):
+    def test_pinned_real_esrgan_model_checksum_matches_published_artifact(self):
+        # Guard the production model-integrity check against an accidental typo.
+        self.assertEqual(
+            sr.MODEL_SHA256,
+            "1940a93ee08283a0a7286183186357b1688fe9fa8ede74604b424586aaddf112",
+        )
+
     def test_16_by_9_capture_targets_4k_uhd(self):
         self.assertEqual(sr.target_4k_dimensions(1280, 720), (3840, 2160))
         self.assertEqual(sr.target_4k_dimensions(1920, 1080), (3840, 2160))
