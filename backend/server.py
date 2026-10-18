@@ -750,6 +750,7 @@ def _queue_missing_media_backfill(base_url: str) -> dict[str, Any]:
                 if event.get("enhanced_url") and current_mode in (
                     "NOISE_AWARE_CLAHE_V2",
                     "IR_CAST_GRAYSCALE_CLAHE_V2",
+                    "AUTO_IR_CAST_GRAYSCALE_CLAHE_V2",
                 ):
                     continue
 
