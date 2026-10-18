@@ -18,11 +18,20 @@ Raspberry Pi 4 Edge Node (OV5647 + NocturPod Agent)
 
 - **Raspberry Pi 4 Model B (8GB)**: Runs `agent/main.py` as a systemd service (`nocturpod-agent.service`). Connects to the OV5647 camera, transmits live MJPEG frames, sends hardware telemetry heartbeats, polls dashboard commands, buffers media locally in `~/nocturpod/media/`, and uploads captures.
 - **Backend (Railway / Flask / Gunicorn)**: Ingests real camera streams, verifies `X-Device-Token` authorization, queues commands, manages Supabase PostgreSQL and Supabase Storage access, and executes asynchronous AI enhancement pipelines immediately after media ingestion.
-- **AI Enhancement Engine**: Utilizes the genuine Adaptive CLAHE LAB luminance normalization and detail sharpening algorithm from `ai_model_source`, alongside YOLOv8 perimeter security classification. Every capture creates distinct **ORIGINAL** and **ENHANCED** assets.
+- **AI Enhancement Engine**: Uses noise-aware CLAHE in LAB luminance, adaptive denoising, and automatic grayscale normalization when dark frames have a strong red/purple IR colour cast. YOLOv8 attempts to detect people and selected objects with a more permissive threshold/larger inference size in very dark scenes. Every capture keeps separate **ORIGINAL** and **ENHANCED** assets; the original is never overwritten.
 - **Frontend (Vercel)**: Displays real camera feed, hardware telemetry, and provides controls for manual still captures, video recording start/stop, and side-by-side inspection and download of Original vs. Enhanced media.
 
 ---
 
+## 1.1 Reading AI quality numbers correctly
+
+The image/video viewer displays a **Visibility Index** before and after enhancement and its **relative change**. These are engineering heuristics based on luminance/exposure, contrast, edge detail, estimated noise, and clipping. They are useful for comparing the same capture before and after processing, but they are **not a percentage of human-recognition accuracy**.
+
+The object-detection labels display YOLO model confidence, also not ground-truth accuracy. Real accuracy/precision/recall must be measured against a manually labelled test set with people visible at known distances, with and without flashlight/IR illumination. For the current enhancement version, each processed capture records the visibility metrics and whether IR colour-cast normalization was applied. Old assets without the V2 marker are eligible for automatic reprocessing when the gallery is requested.
+
+The screenshot samples showed strong red/purple chroma noise and limited scene detail. Grayscale normalization and denoising can reduce distracting colour noise, but they cannot recover detail never captured by the sensor. Adjust exposure, gain, illumination, camera focus and shutter before relying on enhancement; long exposures can blur moving people and high analogue gain increases noise.
+
+---
 ## 2. Environment Configuration
 
 Copy `.env.example` to configure your environment:
