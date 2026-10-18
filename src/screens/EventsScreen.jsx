@@ -11,7 +11,10 @@ export default function EventsScreen({ events = [], onSelectEvent }) {
   const [searchQuery, setSearchQuery] = useState('');
 
   const filteredEvents = events.filter((evt) => {
-    if (filterType !== 'ALL' && evt.type !== filterType) {
+    if (filterType === 'IMAGE_CAPTURE' && !['MANUAL_CAPTURE', 'MOTION_CAPTURE'].includes(evt.type)) {
+      return false;
+    }
+    if (!['ALL', 'IMAGE_CAPTURE'].includes(filterType) && evt.type !== filterType) {
       return false;
     }
     if (searchQuery.trim()) {
@@ -35,8 +38,8 @@ export default function EventsScreen({ events = [], onSelectEvent }) {
             ALL EVENTS ({events.length})
           </button>
           <button 
-            className={`filter-chip mono ${filterType === 'MANUAL_CAPTURE' ? 'active' : ''}`}
-            onClick={() => setFilterType('MANUAL_CAPTURE')}
+            className={`filter-chip mono ${filterType === 'IMAGE_CAPTURE' ? 'active' : ''}`}
+            onClick={() => setFilterType('IMAGE_CAPTURE')}
           >
             CAPTURES
           </button>
