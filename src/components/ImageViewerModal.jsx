@@ -29,6 +29,7 @@ export default function ImageViewerModal({ image, onClose, onDelete }) {
   const qualityBefore = quality?.before?.visibility_index;
   const qualityAfter = quality?.after?.visibility_index;
   const qualityChange = quality?.relative_change_pct;
+  const detections = Array.isArray(image.detections) ? image.detections : [];
 
   const activeDisplayUrl = viewMode === 'ENHANCED' && isEnhancedReady ? enhancedUrl : originalUrl;
 
@@ -174,6 +175,18 @@ export default function ImageViewerModal({ image, onClose, onDelete }) {
         {qualityBefore != null && (
           <div className="quality-disclaimer mono">*Heuristic exposure / contrast / detail / noise score; not a person-recognition accuracy percentage.</div>
         )}
+        <div className="detection-summary">
+          <span className="meta-label mono">STORED OBJECT DETECTIONS</span>
+          <div className="detection-pills">
+            {detections.length > 0 ? detections.map((detection, index) => (
+              <span className="detection-pill mono" key={(detection.label || 'object') + '-' + index}>
+                {(detection.label || 'Object').toUpperCase()} {detection.confidence != null ? (Number(detection.confidence) * 100).toFixed(1) + '%' : ''}
+              </span>
+            )) : (
+              <span className="detection-none mono">No stored detections for this frame. This does not prove the scene is empty.</span>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
