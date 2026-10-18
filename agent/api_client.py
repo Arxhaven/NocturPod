@@ -81,7 +81,7 @@ class NocturPodApiClient:
             print(f"[Stream Frame] Push error: {e}")
             return False
 
-    def upload_media(self, file_path: Path, event_id: str, media_type: str, duration: str = "0s") -> bool:
+    def upload_media(self, file_path: Path, event_id: str, media_type: str, duration: str = "0s", capture_source: str = "MANUAL") -> bool:
         if not file_path.exists():
             print(f"[Upload] File not found: {file_path}")
             return False
@@ -93,7 +93,8 @@ class NocturPodApiClient:
                     "event_id": event_id,
                     "device_id": DEVICE_ID,
                     "media_type": media_type,
-                    "duration": duration
+                    "duration": duration,
+                    "capture_source": (capture_source or "MANUAL").upper()
                 }
                 res = self.session.post(
                     f"{self.backend_url}/api/media/upload",
