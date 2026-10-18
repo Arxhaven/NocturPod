@@ -26,7 +26,8 @@ MODEL_URL = os.getenv(
     "NOCTURPOD_SR_MODEL_URL",
     "https://huggingface.co/CoderViking/realesr-general-x4v3-onnx/resolve/main/realesr-general-x4v3.onnx",
 )
-MODEL_SHA256 = "1940a93ee08283a0a7286183186357b1688fe9fa8edead95b731f05bece96292"
+# Verified against the publisher's ONNX file metadata (SHA-256).
+MODEL_SHA256 = "1940a93ee08283a0a7286183186357b1688fe9fa8ede74604b424586aaddf112"
 MODEL_NAME = "Real-ESRGAN general x4v3 (ONNX)"
 MODEL_SCALE = 4
 TARGET_LONG_EDGE = max(720, int(os.getenv("NOCTURPOD_OUTPUT_LONG_EDGE", "3840")))
