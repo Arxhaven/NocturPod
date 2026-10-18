@@ -281,6 +281,31 @@ export async function setLightIntensity(mode, intensityPct) {
 
 
 /**
+ * Runs real YOLO object detection against an existing stored image capture.
+ * The backend persists labels and normalized boxes so the viewer can draw them
+ * on either the original or enhanced rendition.
+ */
+export async function detectEventObjects(eventId) {
+  if (!eventId || typeof eventId !== 'string') {
+    throw new Error('A valid capture event ID is required for object detection.');
+  }
+  const res = await fetchWithTimeout(
+    buildApiUrl(`/api/events/${encodeURIComponent(eventId)}/detect`),
+    {
+      method: 'POST',
+      headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({}),
+    },
+    45000
+  );
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.detection_status?.message || data?.error || `Object detection failed (${res.status}).`);
+  }
+  return data;
+}
+
+/**
  * Fetches AI enhancement pipeline and vision model status.
  */
 export async function fetchAiStatus() {
