@@ -621,14 +621,51 @@ def _save_detection_status(event: dict[str, Any], payload: dict[str, Any]) -> No
         notes=notes,
     )
 
+
+def _detect_and_persist_image(event_id: str, enhanced_path: Path, original_path: Path) -> None:
+    """Run object detection only after enhancement is safely persisted and marked complete."""
+    try:
+        enhanced_frame = cv2.imread(str(enhanced_path), cv2.IMREAD_COLOR)
+        original_frame = cv2.imread(str(original_path), cv2.IMREAD_COLOR)
+        result, source, sources_checked = _run_object_detection_with_fallback(
+            enhanced_frame, original_frame
+        )
+        outcome = _format_detection_status(result, source, sources_checked)
+
+        if result.get("status") == "COMPLETE":
+            _store_object_detections(event_id, result)
+
+        event = get_event(event_id)
+        if event:
+            _save_detection_status(event, outcome)
+        else:
+            log_system_event(
+                "WARNING", "AI_DETECTION",
+                f"Could not load event {event_id} to persist detection status."
+            )
+        log_system_event(
+            "INFO" if outcome["status"] in ("COMPLETE", "NO_DETECTIONS") else "WARNING",
+            "AI_DETECTION",
+            f"Post-enhancement scan for {event_id}: {outcome['status']} ({outcome['count']} detection(s))",
+        )
+    except Exception as exc:
+        # The enhanced image is already safely published. Detection errors are diagnostic
+        # only and must not downgrade the event or delete the enhanced asset.
+        log_system_event(
+            "ERROR", "AI_DETECTION",
+            f"Post-enhancement object detection failed for {event_id}: {type(exc).__name__}: {exc}"
+        )
+        print(f"[AI Detection] Post-enhancement detection failed for {event_id}: {type(exc).__name__}: {exc}")
+
+
 def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, media_type: str, date_str: str) -> None:
     """Runs immediately after original capture/recording is finalized:
     1. Sets event to ENHANCEMENT_PROCESSING
     2. Runs AI enhancement model
     3. Saves separate ENHANCED media file
     4. Uploads ENHANCED asset to Supabase Storage
-    5. Records detections if image
-    6. Updates database event to COMPLETE
+    5. Publishes enhanced asset and marks the event COMPLETE
+    6. Runs image object detection as a post-enhancement best-effort step
     """
     try:
         update_event_status(event_id, status="ENHANCEMENT_PROCESSING", ai_status="PROCESSING")
@@ -653,38 +690,6 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
                 print(f"[AI Pipeline] Image enhancement failed for {event_id}: {res.get('error', 'unknown error')}")
                 return
 
-            # Try the enhanced image first, then retry on the untouched original if
-            # enhancement has removed or altered the visible cues for a target.
-            pending_detections: list[dict[str, Any]] = []
-            detection_result: dict[str, Any] = {
-                "status": "FAILED", "error": "Image could not be decoded for object detection.",
-                "detections": [], "count": 0,
-            }
-            detection_source = "NONE"
-            detection_sources_checked: list[str] = []
-            try:
-                img_bgr = cv2.imread(str(enhanced_local_path), cv2.IMREAD_COLOR)
-                original_bgr = cv2.imread(str(orig_path), cv2.IMREAD_COLOR)
-                detection_result, detection_source, detection_sources_checked = _run_object_detection_with_fallback(
-                    img_bgr, original_bgr
-                )
-                if detection_result.get("status") == "COMPLETE":
-                    pending_detections = detection_result.get("detections", [])
-                else:
-                    print(
-                        f"[AI Detection] {detection_result.get('status')}: "
-                        f"{detection_result.get('error', 'detector unavailable')} for {event_id}"
-                    )
-            except Exception as det_err:
-                detection_result = {
-                    "status": "FAILED", "error": f"{type(det_err).__name__}: {det_err}",
-                    "detections": [], "count": 0,
-                }
-                print(f"[AI Detection] Notice: object detection failed non-fatally for {event_id}: {det_err}")
-            object_detection_status = _format_detection_status(
-                detection_result, detection_source, detection_sources_checked
-            )
-
             # Only publish an enhanced asset after its cloud upload succeeds.
             enhanced_uploaded = upload_to_supabase_storage(
                 enhanced_local_path, enhanced_storage_path, content_type="image/jpeg"
@@ -698,11 +703,6 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
                 )
                 print(f"[AI Pipeline] Enhanced image upload failed for {event_id}; preserving original")
                 return
-
-            # Publish detections only after the enhanced media upload has succeeded.
-            # If the model is unavailable, retain earlier results rather than clearing them.
-            if detection_result.get("status") == "COMPLETE":
-                _store_object_detections(event_id, detection_result)
 
             # Record ENHANCED media asset
             record_media_asset({
@@ -762,17 +762,19 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
             })
 
         quality_metrics = res.get("quality_metrics") if isinstance(res, dict) else None
-        if media_type == "IMAGE":
-            quality_metrics = dict(quality_metrics or {})
-            quality_metrics["object_detection"] = object_detection_status
         quality_note = (
             "AI_QUALITY:" + json.dumps(quality_metrics, separators=(",", ":"), ensure_ascii=True)
             if quality_metrics else "AI enhancement completed; no quality sample was available."
         )
+        # Publish the completed enhancement before object detection. Detection is an
+        # optional follow-up and must never keep the enhanced media hidden or pending.
         update_event_status(
             event_id, status="COMPLETE", ai_status="COMPLETE", notes=quality_note
         )
         log_system_event("INFO", "AI_ENGINE", f"Enhancement completed for event {event_id}")
+
+        if media_type == "IMAGE":
+            _detect_and_persist_image(event_id, enhanced_local_path, orig_path)
 
     except Exception as ex:
         print(f"[AI Pipeline] Enhancement error for {event_id}: {ex}")
