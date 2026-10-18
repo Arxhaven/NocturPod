@@ -238,14 +238,14 @@ def upscale_to_4k(frame: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
     input_name = inputs[0].name
     output_name = outputs[0].name
 
-    out_x4 = np.empty((height * MODEL_SCALE, width * MODEL_SCALE, 3), dtype=np.uint8)
     tile_size = TILE_SIZE
     context = TILE_CONTEXT
     started = time.perf_counter()
 
-    # Serialize SR runs so three simultaneous capture jobs cannot oversubscribe CPU
-    # or allocate several 4K/8K output tensors at the same time.
+    # Serialize SR runs and keep the large 4x output tensor under the lock. This
+    # avoids several concurrent video/image jobs allocating 100+ MB in parallel.
     with _INFERENCE_LOCK:
+        out_x4 = np.empty((height * MODEL_SCALE, width * MODEL_SCALE, 3), dtype=np.uint8)
         for y in range(0, height, tile_size):
             core_height = min(tile_size, height - y)
             y0 = max(0, y - context)
@@ -272,12 +272,12 @@ def upscale_to_4k(frame: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
                 out_x = x * MODEL_SCALE
                 out_x4[out_y:out_y + expected[0], out_x:out_x + expected[1]] = core
 
-    x4_height, x4_width = out_x4.shape[:2]
-    if (x4_width, x4_height) != (target_width, target_height):
-        interpolation = cv2.INTER_AREA if target_width < x4_width else cv2.INTER_LANCZOS4
-        result = cv2.resize(out_x4, (target_width, target_height), interpolation=interpolation)
-    else:
-        result = out_x4
+        x4_height, x4_width = out_x4.shape[:2]
+        if (x4_width, x4_height) != (target_width, target_height):
+            interpolation = cv2.INTER_AREA if target_width < x4_width else cv2.INTER_LANCZOS4
+            result = cv2.resize(out_x4, (target_width, target_height), interpolation=interpolation)
+        else:
+            result = out_x4
 
     return result, {
         "upscaler": MODEL_NAME,
