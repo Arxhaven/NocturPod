@@ -179,6 +179,18 @@ export default function VideoPlayerModal({ video, onClose, onDelete }) {
               </span>
             </div>
           )}
+          {quality?.resolution_before && quality?.resolution_after && (
+            <div className="v-meta-cell" title={quality?.upscaler || 'Learned super-resolution output resolution'}>
+              <span className="v-meta-label mono">SOURCE → OUTPUT</span>
+              <span className="v-meta-value mono">{quality.resolution_before} → {quality.resolution_after}</span>
+            </div>
+          )}
+          {quality?.upscaler && (
+            <div className="v-meta-cell" title={quality?.explanation || 'Learned super-resolution model'}>
+              <span className="v-meta-label mono">RESTORATION MODEL</span>
+              <span className="v-meta-value mono">{quality.upscaler}</span>
+            </div>
+          )}
         </div>
         {qualityBefore != null && (
           <div className="quality-disclaimer mono">*Heuristic quality score sampled from video frames; not a person-recognition accuracy percentage.</div>
