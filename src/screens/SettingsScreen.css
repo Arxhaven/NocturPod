@@ -174,3 +174,107 @@
     grid-template-columns: 1fr;
   }
 }
+
+
+/* Live Raspberry Pi hardware settings */
+.settings-intro {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+}
+.settings-intro-icon {
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--border-muted);
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: var(--color-light-green);
+  flex: 0 0 auto;
+}
+.settings-intro-copy { flex: 1; min-width: 0; }
+.settings-intro-copy h2 {
+  margin: 0 0 5px;
+  color: var(--color-light-green);
+  font-size: 13px;
+  letter-spacing: .06em;
+}
+.settings-intro-copy p {
+  margin: 0;
+  color: var(--color-muted-sage);
+  font-size: 11px;
+  line-height: 1.55;
+}
+.hardware-state {
+  font-size: 9px;
+  padding: 7px 9px;
+  border: 1px solid var(--border-muted);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.hardware-online { color: var(--color-light-green); }
+.hardware-offline { color: #e0b17c; }
+.settings-card-wide { grid-column: 1 / -1; }
+.card-title-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-light-green);
+}
+.setting-control-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 24px;
+}
+.slider-value {
+  font-size: 11px;
+  color: var(--color-light-green);
+  font-variant-numeric: tabular-nums;
+}
+.setting-hint, .settings-note {
+  color: var(--color-muted-sage);
+  font-size: 10px;
+  line-height: 1.55;
+}
+.settings-note {
+  margin: 3px 0 0;
+  padding: 10px 12px;
+  border-left: 2px solid var(--border-muted);
+  background: rgba(5, 31, 32, 0.28);
+}
+.checkbox-wrap input[type="checkbox"] {
+  accent-color: var(--color-light-green);
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+.range-input {
+  width: 100%;
+  min-height: 18px;
+}
+.range-input:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+.settings-save-row {
+  display: flex;
+  justify-content: flex-end;
+}
+.settings-save-row .save-btn {
+  width: min(100%, 340px);
+}
+.settings-save-row .save-btn:disabled {
+  opacity: .6;
+  cursor: wait;
+}
+.toast-notification.toast-error {
+  border-color: #b55d55;
+  color: #f0b5ae;
+}
+@media (max-width: 900px) {
+  .settings-card-wide { grid-column: auto; }
+  .setting-control-grid { grid-template-columns: 1fr; }
+  .settings-intro { flex-wrap: wrap; }
+  .hardware-state { margin-left: 56px; }
+}
