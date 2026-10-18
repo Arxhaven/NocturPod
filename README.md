@@ -18,7 +18,7 @@ Raspberry Pi 4 Edge Node (OV5647 + NocturPod Agent)
 
 - **Raspberry Pi 4 Model B (8GB)**: Runs `agent/main.py` as a systemd service (`nocturpod-agent.service`). Connects to the OV5647 camera, transmits live MJPEG frames, sends hardware telemetry heartbeats, polls dashboard commands, buffers media locally in `~/nocturpod/media/`, and uploads captures.
 - **Backend (Railway / Flask / Gunicorn)**: Ingests real camera streams, verifies `X-Device-Token` authorization, queues commands, manages Supabase PostgreSQL and Supabase Storage access, and executes asynchronous AI enhancement pipelines immediately after media ingestion.
-- **AI Enhancement Engine**: Uses noise-aware CLAHE in LAB luminance, adaptive denoising, and automatic grayscale normalization when dark frames have a strong red/purple IR colour cast. YOLOv8 attempts to detect people and selected objects with a more permissive threshold/larger inference size in very dark scenes. Every capture keeps separate **ORIGINAL** and **ENHANCED** assets; the original is never overwritten.
+- **AI Enhancement Engine**: Uses the pretrained Real-ESRGAN general x4v3 model through ONNX Runtime for learned super-resolution, then outputs a 3840-pixel long edge (3840×2160 for 16:9 captures). Strong red/purple IR casts are normalized to grayscale in the enhanced copy and very dark shadows receive a restrained gamma lift. YOLOv8 attempts to detect people and selected objects with a more permissive threshold/larger inference size in very dark scenes. Every capture keeps separate **ORIGINAL** and **ENHANCED** assets; the original is never overwritten.
 - **Frontend (Vercel)**: Displays real camera feed, hardware telemetry, and provides controls for manual still captures, video recording start/stop, and side-by-side inspection and download of Original vs. Enhanced media.
 
 ---
@@ -27,9 +27,21 @@ Raspberry Pi 4 Edge Node (OV5647 + NocturPod Agent)
 
 The image/video viewer displays a **Visibility Index** before and after enhancement and its **relative change**. These are engineering heuristics based on luminance/exposure, contrast, edge detail, estimated noise, and clipping. They are useful for comparing the same capture before and after processing, but they are **not a percentage of human-recognition accuracy**.
 
-The object-detection labels display YOLO model confidence, also not ground-truth accuracy. Real accuracy/precision/recall must be measured against a manually labelled test set with people visible at known distances, with and without flashlight/IR illumination. For the current enhancement version, each processed capture records the visibility metrics and whether IR colour-cast normalization was applied. Old assets without the V2 marker are eligible for automatic reprocessing when the gallery is requested.
+The object-detection labels display YOLO model confidence, also not ground-truth accuracy. Real accuracy/precision/recall must be measured against a manually labelled test set with people visible at known distances, with and without flashlight/IR illumination. For the current enhancement version, each processed capture records the visibility metrics and whether IR colour-cast normalization was applied. Old assets without the `NOCTURPOD_REAL_ESRGAN_4K_V3` marker are eligible for automatic reprocessing when the gallery is requested.
 
-The screenshot samples showed strong red/purple chroma noise and limited scene detail. Grayscale normalization and denoising can reduce distracting colour noise, but they cannot recover detail never captured by the sensor. Adjust exposure, gain, illumination, camera focus and shutter before relying on enhancement; long exposures can blur moving people and high analogue gain increases noise.
+The night-capture goal is now **learned restoration and super-resolution**, not contrast-only brightening. Real-ESRGAN can synthesize plausible high-frequency texture from degraded input; it cannot guarantee that newly generated facial or object details are factual. It is therefore a visual restoration tool, not a forensic identity-recovery guarantee.
+
+### Real-ESRGAN runtime
+
+- Runtime package: `onnxruntime` CPU provider (no PyTorch dependency on Railway).
+- Model: [Real-ESRGAN general x4v3 ONNX export](https://huggingface.co/CoderViking/realesr-general-x4v3-onnx), based on the official Real-ESRGAN weights and distributed under BSD-3-Clause.
+- The ONNX file is lazily downloaded to `/tmp/nocturpod-models` on the first enhancement, checked against a pinned SHA-256 digest, and reused for the process lifetime. You can set `NOCTURPOD_SR_MODEL_PATH` to a compatible local ONNX model, `NOCTURPOD_MODEL_CACHE_DIR` to change the cache directory, `NOCTURPOD_SR_TILE_SIZE` to tune memory use, or `NOCTURPOD_OUTPUT_LONG_EDGE` to change the default 3840-pixel long edge.
+- If the learned model cannot be downloaded or initialized, enhancement reports a failure and preserves the original; it does **not** silently label Lanczos resizing or the legacy CLAHE operation as AI super-resolution. Open **AI** in the dashboard to inspect model readiness.
+- Videos are restored frame-by-frame at the same frame rate and encoded at the 4K target size, so long video backfills can take substantially longer than still images.
+
+### Training a NocturPod-specific model
+
+The current inference model is an existing pretrained general-image model; it has **not** been fine-tuned on a NocturPod dataset. Do not describe it as a custom-trained NocturPod model. A proper project-specific model needs a curated dataset of paired low-light/IR captures and clean target images of the same scenes, captured at the same time and geometry. Include people at multiple distances, flashlight/no-flash, different exposure/gain levels, IR intensity, motion blur, and empty-scene negatives. Split by scene/session (not random near-duplicate frames) into train/validation/test sets, fine-tune on a GPU following the Real-ESRGAN training recipe, compare against the pretrained baseline, and publish only after measuring validation quality and person detection precision/recall. A single blurry screenshot is not enough to train a reliable restoration model.
 
 ---
 ## 2. Environment Configuration
