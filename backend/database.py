@@ -597,6 +597,7 @@ def clear_detections_for_event(event_id: str) -> None:
 
 
 def record_detection(event_id: str, label: str, confidence: float, x1: float, y1: float, x2: float, y2: float) -> None:
+    """Persist normalized (0..1) box coordinates for resolution-independent overlays."""
     record = {
         "event_id": event_id,
         "label": label,
@@ -615,6 +616,25 @@ def record_detection(event_id: str, label: str, confidence: float, x1: float, y1
             VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (event_id, label, confidence, x1, y1, x2, y2))
             conn.commit()
+
+
+def _annotate_detection_coordinate_space(detections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Tag normalized boxes while keeping older pixel-coordinate rows readable."""
+    annotated = []
+    for item in detections or []:
+        detection = dict(item)
+        coords = []
+        for key in ("x1", "y1", "x2", "y2"):
+            try:
+                coords.append(float(detection.get(key)))
+            except (TypeError, ValueError):
+                coords = []
+                break
+        detection["coordinates_normalized"] = bool(
+            len(coords) == 4 and all(0.0 <= value <= 1.0 for value in coords)
+        )
+        annotated.append(detection)
+    return annotated
 
 
 def get_event(event_id: str) -> dict[str, Any] | None:
@@ -653,18 +673,23 @@ def get_event(event_id: str) -> dict[str, Any] | None:
     ev["enhanced_stream_url"] = get_signed_storage_url(stream_enh["storage_path"]) if stream_enh else None
     ev["media_type"] = ev.get("type") == "VIDEO_RECORDING" and "VIDEO" or "IMAGE"
     ev["processing_status"] = enh.get("processing_status", "PENDING") if enh else (orig and "PENDING" or "NONE")
-    ev["detections"] = detections
+    ev["detections"] = _annotate_detection_coordinate_space(detections)
     _attach_quality_metrics(ev)
     return ev
 
 
 
 def _attach_quality_metrics(event: dict[str, Any]) -> dict[str, Any]:
-    """Expose metric JSON without flooding event timelines with a raw JSON payload."""
+    """Expose quality and detection metadata without flooding event timelines with raw JSON."""
     notes = event.get("notes")
+    event["detection_status"] = None
     if isinstance(notes, str) and notes.startswith("AI_QUALITY:"):
         try:
             metrics = json.loads(notes[len("AI_QUALITY:"):])
+            if not isinstance(metrics, dict):
+                metrics = {}
+            detection_status = metrics.pop("object_detection", None)
+            event["detection_status"] = detection_status
             event["quality_metrics"] = metrics
             before = (metrics.get("before") or {}).get("visibility_index")
             after = (metrics.get("after") or {}).get("visibility_index")
@@ -677,6 +702,7 @@ def _attach_quality_metrics(event: dict[str, Any]) -> dict[str, Any]:
                 )
         except (TypeError, ValueError, AttributeError):
             event["quality_metrics"] = None
+            event["detection_status"] = None
     else:
         event["quality_metrics"] = None
     return event
@@ -773,7 +799,7 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
             ev["original_stream_url"] = get_signed_storage_url(stream_orig["storage_path"]) if stream_orig else None
             ev["enhanced_stream_url"] = get_signed_storage_url(stream_enh["storage_path"]) if stream_enh else None
             ev["media_type"] = "VIDEO" if ev.get("type") == "VIDEO_RECORDING" else "IMAGE"
-            ev["detections"] = detections
+            ev["detections"] = _annotate_detection_coordinate_space(detections)
 
             # Orphan reconciliation: if an event is stuck in ENHANCEMENT_PROCESSING or PENDING
             # but has a genuine original asset, reconcile to COMPLETE so the frontend displays it immediately
