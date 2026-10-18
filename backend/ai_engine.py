@@ -477,14 +477,14 @@ class NocturPodAIEngine:
             gray_for_detection = cv2.cvtColor(enhanced, cv2.COLOR_BGR2GRAY)
             input_mean_luminance = float(np.mean(gray_for_detection))
             if input_mean_luminance < 70.0:
-                effective_conf = min(float(conf), 0.15)
-                inference_size = 832
+                effective_conf = min(float(conf), 0.12)
+                inference_size = 1024
             elif input_mean_luminance < 115.0:
-                effective_conf = min(float(conf), 0.18)
-                inference_size = 768
+                effective_conf = min(float(conf), 0.15)
+                inference_size = 960
             else:
-                effective_conf = float(conf)
-                inference_size = 640
+                effective_conf = min(float(conf), 0.20)
+                inference_size = 768
 
             start = time.perf_counter()
             results = self._model(
