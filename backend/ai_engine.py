@@ -29,6 +29,35 @@ MODEL_PATH = os.getenv("MODEL_PATH", "yolov8n.pt")
 DETECTION_CLASSES = [0, 1, 2, 3, 5, 7, 15, 16]
 
 
+def _has_ir_color_cast(frame: np.ndarray) -> bool:
+    """Detect a strong red/purple cast in a dark frame, commonly caused by IR illumination.
+
+    This is a conservative heuristic: it only normalizes colour when luminance is low,
+    saturation is high, and red or magenta channels dominate green across the frame.
+    It does not modify the ORIGINAL asset or change the physical LED wavelength.
+    """
+    if frame is None or frame.size == 0 or frame.ndim != 3 or frame.shape[2] < 3:
+        return False
+    try:
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        mean_luminance = float(np.mean(gray))
+        if mean_luminance >= 145.0:
+            return False
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        mean_saturation = float(np.mean(hsv[:, :, 1]))
+        if mean_saturation < 32.0:
+            return False
+        b_mean, g_mean, r_mean = [float(v) for v in cv2.mean(frame)[:3]]
+        red_cast = r_mean > max(g_mean * 1.13, g_mean + 10.0) and r_mean > b_mean * 1.03
+        magenta_cast = (
+            r_mean > max(g_mean * 1.10, g_mean + 8.0)
+            and b_mean > max(g_mean * 1.10, g_mean + 8.0)
+        )
+        return bool(red_cast or magenta_cast)
+    except Exception:
+        return False
+
+
 def apply_adaptive_clahe(frame: np.ndarray, base_clip: float | None = None) -> np.ndarray:
     """Denoise low-light luminance/chroma, then apply noise-aware CLAHE in LAB.
 
@@ -37,6 +66,13 @@ def apply_adaptive_clahe(frame: np.ndarray, base_clip: float | None = None) -> n
     """
     if frame is None or frame.size == 0:
         return frame
+
+    # IR illumination may produce saturated red/purple imagery with unusable colour
+    # information. Preserve the original file; normalize only the ENHANCED output to
+    # grayscale in these dark, strongly colour-biased scenes.
+    if _has_ir_color_cast(frame):
+        frame = cv2.cvtColor(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
+
     lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
     l_channel, a_channel, b_channel = cv2.split(lab)
 
@@ -121,11 +157,15 @@ def _compare_visibility(original: np.ndarray, enhanced: np.ndarray) -> dict[str,
     before_index = before["visibility_index"]
     after_index = after["visibility_index"]
     relative_change = round(((after_index - before_index) / max(before_index, 1.0)) * 100.0, 1)
+    ir_cast_detected = _has_ir_color_cast(original)
     return {
         "metric_type": "heuristic_visibility_index_not_accuracy",
         "before": before,
         "after": after,
         "relative_change_pct": relative_change,
+        "enhancement_mode": "IR_CAST_GRAYSCALE_AND_CLAHE" if ir_cast_detected else "NOISE_AWARE_CLAHE",
+        "ir_color_cast_detected": ir_cast_detected,
+        "ir_color_cast_normalized": ir_cast_detected,
         "explanation": (
             "Relative change in a heuristic visibility index based on exposure, contrast, "
             "edge detail, estimated noise, and clipping. It is not a percentage of AI accuracy "
@@ -289,8 +329,29 @@ class NocturPodAIEngine:
             }
 
         try:
+            # Low-light imagery needs a slightly more permissive detector threshold and
+            # larger inference size to improve recall for people at a distance. The
+            # returned confidence is still a model score, not a verified accuracy rate.
+            gray_for_detection = cv2.cvtColor(enhanced, cv2.COLOR_BGR2GRAY)
+            input_mean_luminance = float(np.mean(gray_for_detection))
+            if input_mean_luminance < 70.0:
+                effective_conf = min(float(conf), 0.15)
+                inference_size = 832
+            elif input_mean_luminance < 115.0:
+                effective_conf = min(float(conf), 0.18)
+                inference_size = 768
+            else:
+                effective_conf = float(conf)
+                inference_size = 640
+
             start = time.perf_counter()
-            results = self._model(enhanced, conf=conf, classes=DETECTION_CLASSES, verbose=False)[0]
+            results = self._model(
+                enhanced,
+                conf=effective_conf,
+                classes=DETECTION_CLASSES,
+                imgsz=inference_size,
+                verbose=False,
+            )[0]
             elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
 
             detections = []
@@ -315,6 +376,9 @@ class NocturPodAIEngine:
                 "detections": detections,
                 "count": len(detections),
                 "processing_time_ms": elapsed_ms,
+                "confidence_threshold_used": effective_conf,
+                "inference_size": inference_size,
+                "input_mean_luminance": round(input_mean_luminance, 1),
                 "annotated_bgr": annotated_bgr,
                 "enhanced_bgr": enhanced
             }
