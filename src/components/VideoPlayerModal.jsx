@@ -9,7 +9,7 @@ import {
   AlertCircle,
   Trash2
 } from 'lucide-react';
-import { resolveMediaUrl } from '../services/api';
+import { buildApiUrl, resolveMediaUrl } from '../services/api';
 import './VideoPlayerModal.css';
 
 export default function VideoPlayerModal({ video, onClose, onDelete }) {
@@ -19,25 +19,44 @@ export default function VideoPlayerModal({ video, onClose, onDelete }) {
 
   if (!video) return null;
 
+  const eventId = video.event_id || video.id;
   const rawOriginalUrl = video.original_url || video.videoUrl;
   const rawEnhancedUrl = video.enhanced_url;
   const originalUrl = resolveMediaUrl(rawOriginalUrl);
   const enhancedUrl = resolveMediaUrl(rawEnhancedUrl);
-  const isEnhancedReady = video.processing_status === 'COMPLETE' && enhancedUrl;
+  const isEnhancedReady = video.processing_status === 'COMPLETE' && Boolean(enhancedUrl);
   const isEnhancing = video.processing_status === 'PROCESSING' || video.processing_status === 'PENDING';
   const quality = video.quality_metrics;
   const qualityBefore = quality?.before?.visibility_index;
   const qualityAfter = quality?.after?.visibility_index;
   const qualityChange = quality?.relative_change_pct;
 
-  const activeDisplayUrl = viewMode === 'ENHANCED' && isEnhancedReady ? enhancedUrl : originalUrl;
+  // Stream through the backend, which returns a range-capable H.264 MP4 URL.
+  // Older mp4v captures get a separate browser-playback copy; stored originals
+  // and enhanced assets remain available unchanged for downloads.
+  const originalStreamUrl = eventId
+    ? buildApiUrl(`/api/media/stream/${encodeURIComponent(eventId)}/original`)
+    : originalUrl;
+  const enhancedStreamUrl = eventId
+    ? buildApiUrl(`/api/media/stream/${encodeURIComponent(eventId)}/enhanced`)
+    : enhancedUrl;
+  const originalDownloadUrl = eventId
+    ? buildApiUrl(`/api/media/download/${encodeURIComponent(eventId)}/original`)
+    : originalUrl;
+  const enhancedDownloadUrl = eventId
+    ? buildApiUrl(`/api/media/download/${encodeURIComponent(eventId)}/enhanced`)
+    : enhancedUrl;
+
+  const activeDisplayUrl = viewMode === 'ENHANCED' && isEnhancedReady
+    ? enhancedStreamUrl
+    : originalStreamUrl;
 
   return (
     <div className="video-modal-backdrop" onClick={onClose}>
       <div className="video-modal-container" onClick={(e) => e.stopPropagation()}>
         <div className="video-modal-header">
           <div className="v-title-group">
-            <span className="v-id mono">{video.event_id || video.id}</span>
+            <span className="v-id mono">{eventId}</span>
             <div className="v-status-indicator">
               {video.status === 'ENHANCEMENT_FAILED' ? (
                 <span className="tag-original mono">
@@ -138,7 +157,7 @@ export default function VideoPlayerModal({ video, onClose, onDelete }) {
             <div className="no-media-box mono">
               <AlertCircle size={28} />
               <span>VIDEO CURRENTLY UNAVAILABLE</span>
-              <span className="mono">The recording may be missing from Storage.</span>
+              <span className="mono">Playback could not be opened. Check the network and storage links; the download actions above may still work.</span>
             </div>
           )}
         </div>
