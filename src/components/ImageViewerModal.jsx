@@ -25,6 +25,10 @@ export default function ImageViewerModal({ image, onClose, onDelete }) {
   const enhancedUrl = resolveMediaUrl(rawEnhancedUrl);
   const isEnhancedReady = image.processing_status === 'COMPLETE' && enhancedUrl;
   const isEnhancing = image.processing_status === 'PROCESSING' || image.processing_status === 'PENDING';
+  const quality = image.quality_metrics;
+  const qualityBefore = quality?.before?.visibility_index;
+  const qualityAfter = quality?.after?.visibility_index;
+  const qualityChange = quality?.relative_change_pct;
 
   const activeDisplayUrl = viewMode === 'ENHANCED' && isEnhancedReady ? enhancedUrl : originalUrl;
 
@@ -154,7 +158,22 @@ export default function ImageViewerModal({ image, onClose, onDelete }) {
             <span className="meta-label mono">STATUS</span>
             <span className="meta-val mono">{image.processing_status || 'COMPLETE'}</span>
           </div>
+          {qualityBefore != null && qualityAfter != null && (
+            <>
+              <div className="meta-cell" title={quality?.explanation || 'Heuristic image-quality indicator, not AI accuracy.'}>
+                <span className="meta-label mono">VISIBILITY INDEX*</span>
+                <span className="meta-val mono">{qualityBefore.toFixed(1)} → {qualityAfter.toFixed(1)} / 100</span>
+              </div>
+              <div className="meta-cell" title="Relative change in a heuristic visibility index, not a percentage of detection accuracy.">
+                <span className="meta-label mono">RELATIVE CHANGE*</span>
+                <span className="meta-val mono">{qualityChange > 0 ? '+' : ''}{qualityChange?.toFixed(1)}%</span>
+              </div>
+            </>
+          )}
         </div>
+        {qualityBefore != null && (
+          <div className="quality-disclaimer mono">*Heuristic exposure / contrast / detail / noise score; not a person-recognition accuracy percentage.</div>
+        )}
       </div>
     </div>
   );
