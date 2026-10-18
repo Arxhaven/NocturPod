@@ -25,6 +25,10 @@ export default function VideoPlayerModal({ video, onClose, onDelete }) {
   const enhancedUrl = resolveMediaUrl(rawEnhancedUrl);
   const isEnhancedReady = video.processing_status === 'COMPLETE' && enhancedUrl;
   const isEnhancing = video.processing_status === 'PROCESSING' || video.processing_status === 'PENDING';
+  const quality = video.quality_metrics;
+  const qualityBefore = quality?.before?.visibility_index;
+  const qualityAfter = quality?.after?.visibility_index;
+  const qualityChange = quality?.relative_change_pct;
 
   const activeDisplayUrl = viewMode === 'ENHANCED' && isEnhancedReady ? enhancedUrl : originalUrl;
 
@@ -155,7 +159,22 @@ export default function VideoPlayerModal({ video, onClose, onDelete }) {
             <span className="v-meta-label mono">ENHANCEMENT STATUS</span>
             <span className="v-meta-value mono">{video.processing_status || 'PENDING'}</span>
           </div>
+          {qualityBefore != null && qualityAfter != null && (
+            <>
+              <div className="v-meta-cell" title={quality?.explanation || 'Heuristic image-quality indicator, not AI accuracy.'}>
+                <span className="v-meta-label mono">VISIBILITY INDEX*</span>
+                <span className="v-meta-value mono">{qualityBefore.toFixed(1)} → {qualityAfter.toFixed(1)} / 100</span>
+              </div>
+              <div className="v-meta-cell" title="Relative change in a heuristic visibility index, not a percentage of detection accuracy.">
+                <span className="v-meta-label mono">RELATIVE CHANGE*</span>
+                <span className="v-meta-value mono">{qualityChange > 0 ? '+' : ''}{qualityChange?.toFixed(1)}%</span>
+              </div>
+            </>
+          )}
         </div>
+        {qualityBefore != null && (
+          <div className="quality-disclaimer mono">*Heuristic quality score sampled from video frames; not a person-recognition accuracy percentage.</div>
+        )}
       </div>
     </div>
   );
