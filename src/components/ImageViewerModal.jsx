@@ -171,6 +171,12 @@ export default function ImageViewerModal({ image, onClose, onDelete }) {
               </div>
             </>
           )}
+          {quality?.ir_color_cast_detected && (
+            <div className="meta-cell" title="The enhanced copy was normalized to grayscale because the original had a strong red/purple IR colour cast. The original is unchanged.">
+              <span className="meta-label mono">NIGHT COLOUR</span>
+              <span className="meta-val mono">IR CAST → GRAYSCALE</span>
+            </div>
+          )}
         </div>
         {qualityBefore != null && (
           <div className="quality-disclaimer mono">*Heuristic exposure / contrast / detail / noise score; not a person-recognition accuracy percentage.</div>
