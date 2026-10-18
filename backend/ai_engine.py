@@ -30,38 +30,115 @@ DETECTION_CLASSES = [0, 1, 2, 3, 5, 7, 15, 16]
 
 
 def apply_adaptive_clahe(frame: np.ndarray, base_clip: float | None = None) -> np.ndarray:
-    """LAB luminance enhancement from ai_model_source/inference.py.
-    Provides gentle luminance normalization without introducing noisy global contrast boosts.
+    """Denoise low-light luminance/chroma, then apply noise-aware CLAHE in LAB.
+
+    Very dark, grainy IR frames must not receive the strongest contrast boost:
+    that amplifies sensor speckles and makes people less recognizable.
     """
     if frame is None or frame.size == 0:
         return frame
     lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
     l_channel, a_channel, b_channel = cv2.split(lab)
+
+    # A light, edge-preserving luminance denoise plus a 3x3 chroma median suppresses
+    # the red/purple sensor speckles visible in the provided gallery screenshot.
+    l_denoised = cv2.fastNlMeansDenoising(
+        l_channel, None, h=4.0, templateWindowSize=7, searchWindowSize=15
+    )
+    a_denoised = cv2.medianBlur(a_channel, 3)
+    b_denoised = cv2.medianBlur(b_channel, 3)
+
+    mean_luma = float(np.mean(l_denoised))
+    residual = cv2.absdiff(l_denoised, cv2.medianBlur(l_denoised, 3))
+    noise_estimate = float(np.median(residual))
     if base_clip is not None:
         clip_limit = float(base_clip)
     else:
-        brightness = float(np.mean(l_channel))
-        # Darker scenes get slightly more lift, bounded to the recommended 1.8–2.5 range.
-        clip_limit = float(np.clip(2.5 - brightness / 255.0 * 0.7, 1.8, 2.5))
+        # Use less local contrast for noisier frames so noise is not mistaken for detail.
+        clip_limit = float(np.clip(2.0 - noise_estimate * 0.07, 1.2, 2.0))
+        if mean_luma < 55:
+            clip_limit = min(2.05, clip_limit + 0.12)
+
     clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
-    enhanced = cv2.merge((clahe.apply(l_channel), a_channel, b_channel))
+    enhanced_luma = clahe.apply(l_denoised)
+
+    # Mild luminance-only sharpening preserves edges without sharpening chroma noise.
+    sigma = 0.8
+    blurred = cv2.GaussianBlur(enhanced_luma, (0, 0), sigmaX=sigma)
+    sharpen_amount = float(np.clip(0.16 - noise_estimate * 0.004, 0.06, 0.16))
+    sharpened_luma = cv2.addWeighted(
+        enhanced_luma, 1.0 + sharpen_amount, blurred, -sharpen_amount, 0
+    )
+    enhanced = cv2.merge((sharpened_luma, a_denoised, b_denoised))
     return cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
 
 
+def measure_visibility_index(frame: np.ndarray) -> dict[str, float]:
+    """Return an explainable image-quality proxy, not a recognition accuracy metric."""
+    if frame is None or frame.size == 0:
+        return {
+            "visibility_index": 0.0,
+            "mean_luminance": 0.0,
+            "contrast": 0.0,
+            "detail": 0.0,
+            "noise_estimate": 0.0,
+            "clipped_pixels_pct": 0.0,
+        }
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
+    smooth = cv2.medianBlur(gray, 3) if min(gray.shape[:2]) >= 3 else gray
+    mean_luma = float(np.mean(smooth))
+    contrast = float(np.std(smooth))
+    residual = cv2.absdiff(gray, smooth)
+    noise = float(np.median(residual))
+    lap_var = float(cv2.Laplacian(smooth, cv2.CV_32F).var())
+    clipped = float(np.mean((gray <= 5) | (gray >= 250)) * 100.0)
+
+    exposure_score = max(0.0, 100.0 - abs(mean_luma - 88.0) * 1.1)
+    contrast_score = min(100.0, contrast * 1.7)
+    detail_score = min(100.0, float(np.sqrt(max(0.0, lap_var))) * 3.0)
+    noise_score = max(0.0, 100.0 - noise * 4.0)
+    clipping_score = max(0.0, 100.0 - clipped * 3.0)
+    score = (
+        0.30 * exposure_score
+        + 0.20 * contrast_score
+        + 0.20 * detail_score
+        + 0.20 * noise_score
+        + 0.10 * clipping_score
+    )
+    return {
+        "visibility_index": round(float(np.clip(score, 0.0, 100.0)), 1),
+        "mean_luminance": round(mean_luma, 1),
+        "contrast": round(contrast, 1),
+        "detail": round(detail_score, 1),
+        "noise_estimate": round(noise, 1),
+        "clipped_pixels_pct": round(clipped, 2),
+    }
+
+
+def _compare_visibility(original: np.ndarray, enhanced: np.ndarray) -> dict[str, Any]:
+    before = measure_visibility_index(original)
+    after = measure_visibility_index(enhanced)
+    before_index = before["visibility_index"]
+    after_index = after["visibility_index"]
+    relative_change = round(((after_index - before_index) / max(before_index, 1.0)) * 100.0, 1)
+    return {
+        "metric_type": "heuristic_visibility_index_not_accuracy",
+        "before": before,
+        "after": after,
+        "relative_change_pct": relative_change,
+        "explanation": (
+            "Relative change in a heuristic visibility index based on exposure, contrast, "
+            "edge detail, estimated noise, and clipping. It is not a percentage of AI accuracy "
+            "or proof that a person is recognizable."
+        ),
+    }
+
+
 def enhance_frame(frame: np.ndarray) -> np.ndarray:
-    """Enhances a single frame using the ai_model_source pipeline:
-    1. Adaptive CLAHE on LAB luminance
-    2. Detail enhancement (sigma_s=5, sigma_r=0.10) for sharpness preservation
-    """
+    """Noise-aware low-light enhancement tuned to preserve recognizable edges."""
     if frame is None or frame.size == 0:
         return frame
-    clahe_frame = apply_adaptive_clahe(frame)
-    # Detail enhancement from ai_model_source EvidenceWorker
-    try:
-        sharpened = cv2.detailEnhance(clahe_frame, sigma_s=5, sigma_r=0.10)
-        return sharpened
-    except Exception:
-        return clahe_frame
+    return apply_adaptive_clahe(frame)
 
 
 def enhance_image(input_path: str | Path, output_path: str | Path) -> dict[str, Any]:
@@ -78,15 +155,18 @@ def enhance_image(input_path: str | Path, output_path: str | Path) -> dict[str, 
         return {"status": "FAILED", "error": f"Could not read input image: {input_path}"}
 
     enhanced = enhance_frame(img)
-    cv2.imwrite(str(output_p), enhanced, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    write_ok = cv2.imwrite(str(output_p), enhanced, [cv2.IMWRITE_JPEG_QUALITY, 95])
     elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
+    if not write_ok:
+        return {"status": "FAILED", "error": f"Could not write enhanced image: {output_p}"}
 
     return {
         "status": "COMPLETE",
         "output_path": str(output_p),
         "processing_time_ms": elapsed_ms,
         "resolution": f"{img.shape[1]}x{img.shape[0]}",
-        "file_size_bytes": output_p.stat().st_size if output_p.exists() else 0
+        "file_size_bytes": output_p.stat().st_size if output_p.exists() else 0,
+        "quality_metrics": _compare_visibility(img, enhanced),
     }
 
 
@@ -112,6 +192,9 @@ def enhance_video(input_path: str | Path, output_path: str | Path) -> dict[str, 
     out = cv2.VideoWriter(str(output_p), fourcc, fps, (width, height))
 
     processed_frames = 0
+    quality_before: list[dict[str, float]] = []
+    quality_after: list[dict[str, float]] = []
+    sample_interval = max(1, int(round(fps * 2.0)))
     try:
         while True:
             ret, frame = cap.read()
@@ -119,6 +202,9 @@ def enhance_video(input_path: str | Path, output_path: str | Path) -> dict[str, 
                 break
             enhanced = enhance_frame(frame)
             out.write(enhanced)
+            if processed_frames % sample_interval == 0:
+                quality_before.append(measure_visibility_index(frame))
+                quality_after.append(measure_visibility_index(enhanced))
             processed_frames += 1
     finally:
         cap.release()
@@ -127,6 +213,32 @@ def enhance_video(input_path: str | Path, output_path: str | Path) -> dict[str, 
     elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
     duration_sec = round(processed_frames / fps, 1) if fps > 0 else 0
 
+    if processed_frames == 0 or not output_p.exists() or output_p.stat().st_size == 0:
+        return {"status": "FAILED", "error": "Video contained no decodable frames."}
+
+    def average_metrics(samples: list[dict[str, float]]) -> dict[str, float]:
+        if not samples:
+            return {}
+        keys = samples[0].keys()
+        return {key: round(float(np.mean([sample[key] for sample in samples])), 1) for key in keys}
+
+    before_metrics = average_metrics(quality_before)
+    after_metrics = average_metrics(quality_after)
+    before_index = before_metrics.get("visibility_index", 0.0)
+    after_index = after_metrics.get("visibility_index", 0.0)
+    quality_metrics = {
+        "metric_type": "heuristic_visibility_index_not_accuracy",
+        "sample_interval_seconds": 2,
+        "sample_count": len(quality_before),
+        "before": before_metrics,
+        "after": after_metrics,
+        "relative_change_pct": round(((after_index - before_index) / max(before_index, 1.0)) * 100.0, 1),
+        "explanation": (
+            "Relative change in a heuristic visibility index sampled every two seconds. "
+            "It is not a percentage of AI accuracy or proof that a person is recognizable."
+        ),
+    }
+
     return {
         "status": "COMPLETE",
         "output_path": str(output_p),
@@ -134,7 +246,8 @@ def enhance_video(input_path: str | Path, output_path: str | Path) -> dict[str, 
         "processed_frames": processed_frames,
         "duration_sec": duration_sec,
         "resolution": f"{width}x{height}",
-        "file_size_bytes": output_p.stat().st_size if output_p.exists() else 0
+        "file_size_bytes": output_p.stat().st_size,
+        "quality_metrics": quality_metrics,
     }
 
 
@@ -156,13 +269,13 @@ class NocturPodAIEngine:
             self._model = None
             self.is_ready = False
 
-    def infer(self, image_bgr: np.ndarray, conf: float = 0.30) -> dict[str, Any]:
+    def infer(self, image_bgr: np.ndarray, conf: float = 0.22, already_enhanced: bool = False) -> dict[str, Any]:
         """Runs object detection on frame using the genuine classes from ai_model_source."""
         if image_bgr is None or image_bgr.size == 0:
             return {"status": "FAILED", "detections": [], "count": 0}
 
-        # First enhance the frame
-        enhanced = enhance_frame(image_bgr)
+        # Avoid enhancing the same image twice in the ingestion pipeline.
+        enhanced = image_bgr if already_enhanced else enhance_frame(image_bgr)
 
         if not self.is_ready and _YOLO_AVAILABLE:
             self._load_model()
