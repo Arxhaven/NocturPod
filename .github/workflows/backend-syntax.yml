@@ -1,4 +1,4 @@
-name: Backend Python syntax check
+name: Backend Python syntax and super-resolution tests
 
 on:
   pull_request:
@@ -14,7 +14,7 @@ on:
       - ".github/workflows/backend-syntax.yml"
 
 jobs:
-  python-syntax:
+  python-validation:
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -25,3 +25,7 @@ jobs:
           python-version: "3.11"
       - name: Compile backend and tests
         run: python -m compileall -q backend tests
+      - name: Install focused test dependencies
+        run: python -m pip install numpy "opencv-python-headless>=4.9,<4.13"
+      - name: Test super-resolution geometry, tiling, and retry
+        run: python -m unittest discover -s tests -p "test_super_resolution.py" -v
