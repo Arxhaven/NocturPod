@@ -260,3 +260,11 @@
     gap: 8px;
   }
 }
+
+.video-modal-footer {
+  flex-wrap: wrap;
+  gap: 14px 24px;
+}
+.video-modal-footer .v-meta-cell {
+  min-width: 100px;
+}
