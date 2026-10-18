@@ -1190,6 +1190,21 @@ def download_event_media(event_id: str, variant: str):
     safe_event = _safe_media_identifier(event_id) or "nocturpod-video"
     download_name = f"nocturpod-{safe_event}-{variant.lower()}{Path(source_filename).suffix or '.mp4'}"
 
+    # For legacy ENHANCED videos that were encoded with mp4v, download the
+    # H.264 playback copy. ORIGINAL downloads remain byte-for-byte source assets.
+    if variant == "ENHANCED" and event.get("type") == "VIDEO_RECORDING":
+        playback_url, playback_local_path, _playback_name = _ensure_browser_video_asset(event_id, "ENHANCED")
+        if playback_url:
+            media_url = playback_url
+        elif playback_local_path and playback_local_path.is_file():
+            return send_file(
+                playback_local_path,
+                mimetype="video/mp4",
+                as_attachment=True,
+                download_name=download_name,
+                conditional=True,
+            )
+
     if media_url.startswith(("https://", "http://", "/")):
         # Supabase Storage supports a download query parameter on signed object URLs.
         # If signing was temporarily unavailable, the same parameter is carried through
