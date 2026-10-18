@@ -729,7 +729,10 @@ def _queue_missing_media_backfill(base_url: str) -> dict[str, Any]:
                 ai_status = str(event.get("ai_status") or "").upper()
                 if status in ("AI_BACKFILL_QUEUED", "ENHANCEMENT_PROCESSING") or ai_status == "PROCESSING":
                     continue
-                if event.get("enhanced_url"):
+                # Re-run older enhanced assets once when they lack the new
+                # before/after visibility metrics; this marks the older enhancement
+                # algorithm/version as stale without ever touching the ORIGINAL.
+                if event.get("enhanced_url") and event.get("quality_metrics"):
                     continue
 
                 # New uploads are handled by /api/media/upload. However, retry a
