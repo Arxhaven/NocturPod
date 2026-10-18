@@ -232,6 +232,55 @@ export async function setLightMode(mode) {
 
 
 /**
+ * Queues live camera controls to the Raspberry Pi agent.
+ */
+export async function applyCameraSettings(settings) {
+  const res = await fetchWithTimeout(buildApiUrl('/api/device/camera/settings'), {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(settings || {}),
+  }, 10000);
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Camera settings error (${res.status}): ${errText || res.statusText}`);
+  }
+  return await res.json();
+}
+
+/**
+ * Enables/disables PIR-triggered capture and sets the software cooldown.
+ */
+export async function setPirSettings(settings) {
+  const res = await fetchWithTimeout(buildApiUrl('/api/device/pir/settings'), {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(settings || {}),
+  }, 10000);
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`PIR settings error (${res.status}): ${errText || res.statusText}`);
+  }
+  return await res.json();
+}
+
+/**
+ * Queues white or IR/night illumination output level. Requires PWM-capable hardware.
+ */
+export async function setLightIntensity(mode, intensityPct) {
+  const res = await fetchWithTimeout(buildApiUrl('/api/device/light/intensity'), {
+    method: 'POST',
+    headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ mode, intensity_pct: intensityPct }),
+  }, 10000);
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Light intensity error (${res.status}): ${errText || res.statusText}`);
+  }
+  return await res.json();
+}
+
+
+/**
  * Fetches AI enhancement pipeline and vision model status.
  */
 export async function fetchAiStatus() {
