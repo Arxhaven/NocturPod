@@ -177,6 +177,7 @@ gunicorn --config gunicorn.conf.py backend.server:app
 ### Run Tests:
 ```bash
 python -m unittest tests/test_backend.py
+python -m unittest tests/test_super_resolution.py
 ```
 
 ### Frontend:
