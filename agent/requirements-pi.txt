@@ -1,0 +1,5 @@
+# Raspberry Pi edge-agent dependencies.
+# Install hardware/system modules from Raspberry Pi OS first:
+# sudo apt install python3-picamera2 python3-opencv python3-numpy python3-psutil python3-requests python3-gpiozero python3-lgpio
+# Create the venv with --system-site-packages so Picamera2 and GPIO bindings remain visible.
+requests>=2.31.0
