@@ -27,5 +27,18 @@ jobs:
         run: python -m compileall -q backend tests
       - name: Install focused test dependencies
         run: python -m pip install numpy "opencv-python-headless>=4.9,<4.13"
-      - name: Test super-resolution geometry, tiling, and retry
+      - name: Test super-resolution geometry, tiling, retry, and diagnostics
         run: python -m unittest discover -s tests -p "test_super_resolution.py" -v
+      - name: Install ONNX Runtime for real model smoke test
+        run: python -m pip install "onnxruntime>=1.17,<2"
+      - name: Download pinned Real-ESRGAN model and run actual inference
+        run: |
+          python - <<'PY'
+          import json
+          from backend.super_resolution import diagnose_super_resolution_model
+
+          result = diagnose_super_resolution_model()
+          print(json.dumps(result, indent=2))
+          if result.get("status") != "READY":
+              raise SystemExit("Pinned Real-ESRGAN model failed load/inference smoke test")
+          PY
