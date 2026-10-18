@@ -24,7 +24,7 @@ export default function VideoPlayerModal({ video, onClose, onDelete }) {
   const rawEnhancedUrl = video.enhanced_url;
   const originalUrl = resolveMediaUrl(rawOriginalUrl);
   const enhancedUrl = resolveMediaUrl(rawEnhancedUrl);
-  const isEnhancedReady = video.processing_status === 'COMPLETE' && Boolean(enhancedUrl);
+  const isEnhancedReady = Boolean(enhancedUrl);
   const isEnhancing = video.processing_status === 'PROCESSING' || video.processing_status === 'PENDING';
   const quality = video.quality_metrics;
   const qualityBefore = quality?.before?.visibility_index;
@@ -96,8 +96,8 @@ export default function VideoPlayerModal({ video, onClose, onDelete }) {
             {/* Download Original */}
             {originalUrl && (
               <a 
-                href={originalUrl} 
-                download={`nocturpod-${video.event_id || video.id}-original.mp4`} 
+                href={originalDownloadUrl} 
+                download={`nocturpod-${eventId}-original.mp4`} 
                 className="v-btn mono"
                 title="Download original recorded clip"
               >
@@ -106,10 +106,10 @@ export default function VideoPlayerModal({ video, onClose, onDelete }) {
               </a>
             )}
 
-            {enhancedUrl && isEnhancedReady && (
+            {enhancedUrl && (
               <a 
-                href={enhancedUrl} 
-                download={`nocturpod-${video.event_id || video.id}-enhanced.mp4`} 
+                href={enhancedDownloadUrl} 
+                download={`nocturpod-${eventId}-enhanced.mp4`} 
                 className="v-btn highlight mono"
                 title="Download AI enhanced video clip"
               >
