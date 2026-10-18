@@ -16,15 +16,16 @@ import time
 import threading
 import tempfile
 import urllib.request
+import urllib.parse
 from pathlib import Path
 from typing import Any, Generator
 
 import cv2
 import numpy as np
-from flask import Flask, Response, jsonify, redirect, request, send_from_directory
+from flask import Flask, Response, jsonify, redirect, request, send_file, send_from_directory
 from flask_cors import CORS
 
-from backend.ai_engine import ENGINE, enhance_image, enhance_video
+from backend.ai_engine import ENGINE, enhance_image, enhance_video, _transcode_browser_mp4
 from backend.super_resolution import clear_cached_session_error, get_super_resolution_status
 from backend.database import (
     ack_command,
@@ -984,6 +985,232 @@ def get_footage():
     return jsonify(recordings)
 
 
+# Browser video playback/download helpers
+_BROWSER_PLAYBACK_LOCKS: dict[str, threading.Lock] = {}
+_BROWSER_PLAYBACK_LOCKS_GUARD = threading.Lock()
+
+
+def _safe_media_identifier(value: str) -> str:
+    cleaned = "".join(ch for ch in str(value) if ch.isalnum() or ch in ("-", "_"))
+    return cleaned[:180]
+
+
+def _browser_playback_lock(key: str) -> threading.Lock:
+    with _BROWSER_PLAYBACK_LOCKS_GUARD:
+        return _BROWSER_PLAYBACK_LOCKS.setdefault(key, threading.Lock())
+
+
+def _ensure_browser_video_asset(event_id: str, variant: str) -> tuple[str | None, Path | None, str | None]:
+    """Return an H.264/yuv420p playback copy for an ORIGINAL or ENHANCED event video.
+
+    Source assets are never modified. Legacy mp4v/other videos are transcoded once into
+    separate playback assets, then cached in Supabase Storage as STREAM_ORIGINAL or
+    STREAM_ENHANCED. A native enhanced output already marked H.264 can be streamed directly.
+    """
+    variant = variant.upper()
+    if variant not in ("ORIGINAL", "ENHANCED"):
+        return None, None, "Unsupported video variant"
+
+    event = get_event(event_id)
+    if not event:
+        return None, None, "Recording not found"
+    if event.get("type") != "VIDEO_RECORDING" and event.get("media_type") != "VIDEO":
+        return None, None, "Requested event is not a video recording"
+
+    source_path_key = "original_storage_path" if variant == "ORIGINAL" else "enhanced_storage_path"
+    source_url_key = "original_url" if variant == "ORIGINAL" else "enhanced_url"
+    stream_path_key = "original_stream_storage_path" if variant == "ORIGINAL" else "enhanced_stream_storage_path"
+    stream_url_key = "original_stream_url" if variant == "ORIGINAL" else "enhanced_stream_url"
+
+    existing_stream_path = event.get(stream_path_key)
+    existing_stream_url = event.get(stream_url_key)
+    if existing_stream_path and existing_stream_url:
+        filename = Path(existing_stream_path).name
+        if existing_stream_url.startswith(("https://", "http://")):
+            return existing_stream_url, None, filename
+        local_existing = MEDIA_DIR / filename
+        if local_existing.is_file():
+            return None, local_existing, filename
+        return existing_stream_url, None, filename
+
+    source_url = event.get(source_url_key)
+    source_path = event.get(source_path_key)
+    if not source_path or not source_url:
+        return None, None, f"{variant.title()} video asset is missing"
+
+    quality = event.get("quality_metrics") or {}
+    if variant == "ENHANCED" and quality.get("browser_playback_compatible") and source_url:
+        # New enhanced MP4s are written as H.264 + yuv420p + faststart by ai_engine.py.
+        return source_url, None, Path(source_path).name
+
+    safe_id = _safe_media_identifier(event_id)
+    device_id = _safe_media_identifier(event.get("device_id") or "nocturpod-edge-01")
+    stem = f"{safe_id}_{variant.lower()}_browser"
+    local_output = MEDIA_DIR / f"{stem}.mp4"
+    storage_path = f"playback/videos/{device_id}/{stem}.mp4"
+    asset_variant = "STREAM_ORIGINAL" if variant == "ORIGINAL" else "STREAM_ENHANCED"
+    filename = local_output.name
+
+    with _browser_playback_lock(f"{event_id}:{variant}"):
+        # Another request/process may have created the asset while we waited.
+        event = get_event(event_id) or event
+        existing_stream_path = event.get(stream_path_key)
+        existing_stream_url = event.get(stream_url_key)
+        if existing_stream_path and existing_stream_url:
+            filename = Path(existing_stream_path).name
+            if existing_stream_url.startswith(("https://", "http://")):
+                return existing_stream_url, None, filename
+            local_existing = MEDIA_DIR / filename
+            if local_existing.is_file():
+                return None, local_existing, filename
+            return existing_stream_url, None, filename
+
+        temp_input: Path | None = None
+        try:
+            if not local_output.is_file() or local_output.stat().st_size == 0:
+                local_source = MEDIA_DIR / Path(source_path).name
+                if local_source.is_file():
+                    input_path = local_source
+                elif source_url.startswith(("https://", "http://")):
+                    extension = Path(source_path).suffix.lower()
+                    if extension not in (".mp4", ".mov", ".mkv", ".avi", ".m4v"):
+                        extension = ".mp4"
+                    with tempfile.NamedTemporaryFile(
+                        prefix=f"{safe_id}_{variant.lower()}_source_",
+                        suffix=extension,
+                        dir=str(MEDIA_DIR),
+                        delete=False,
+                    ) as temp:
+                        temp_input = Path(temp.name)
+                        with urllib.request.urlopen(source_url, timeout=60) as response:
+                            shutil.copyfileobj(response, temp)
+                    input_path = temp_input
+                else:
+                    # Supabase credentials are absent and this process has no local
+                    # copy of a historical object, so it cannot transcode that object.
+                    return None, None, "Source is not reachable from this backend"
+
+                _transcode_browser_mp4(input_path, local_output)
+
+            uploaded = upload_to_supabase_storage(
+                local_output, storage_path, content_type="video/mp4"
+            )
+            if has_supabase_config() and not uploaded:
+                log_system_event(
+                    "ERROR", "VIDEO_PLAYBACK",
+                    f"Could not upload browser-compatible playback copy for {event_id} ({variant})"
+                )
+                return None, local_output, filename
+
+            record_media_asset({
+                "id": f"med_{safe_id}_{asset_variant.lower()}",
+                "event_id": event_id,
+                "device_id": event.get("device_id") or "nocturpod-edge-01",
+                "media_type": "VIDEO",
+                "variant": asset_variant,
+                "filename": filename,
+                "storage_path": storage_path,
+                "file_size_bytes": local_output.stat().st_size,
+                "resolution": "Browser-compatible H.264 MP4",
+                "duration": event.get("duration") or "0s",
+                "processing_status": "COMPLETE",
+            })
+            log_system_event(
+                "INFO", "VIDEO_PLAYBACK",
+                f"Created browser-compatible {variant.lower()} playback copy for {event_id}"
+            )
+
+            playback_url = get_signed_storage_url(storage_path)
+            if playback_url and playback_url.startswith(("https://", "http://")):
+                return playback_url, None, filename
+            # Local-only mode uses Flask's Range-capable send_file path directly.
+            return None, local_output, filename
+        except Exception as exc:
+            log_system_event(
+                "ERROR", "VIDEO_PLAYBACK",
+                f"Could not prepare H.264 playback for {event_id} ({variant}): {type(exc).__name__}: {exc}"
+            )
+            return None, None, f"Could not prepare browser-playable video: {type(exc).__name__}: {exc}"
+        finally:
+            if temp_input is not None:
+                try:
+                    temp_input.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+
+@app.get("/api/media/stream/<event_id>/<variant>")
+def stream_event_video(event_id: str, variant: str):
+    """Stream ORIGINAL or ENHANCED clips in a browser-compatible format.
+
+    The exact stored original/enhanced object is preserved. Older mp4v recordings get
+    a separate H.264 playback copy with byte-range support; new enhanced videos are
+    served directly once their H.264 compatibility is recorded.
+    """
+    url, local_path, filename_or_error = _ensure_browser_video_asset(event_id, variant)
+    if url:
+        # Redirect to Supabase so range requests and seeking are handled by Storage/CDN.
+        return redirect(url, code=302)
+    if local_path and local_path.is_file():
+        return send_file(
+            local_path,
+            mimetype="video/mp4",
+            as_attachment=False,
+            download_name=filename_or_error or local_path.name,
+            conditional=True,
+            max_age=3600,
+        )
+    status = 404 if filename_or_error in ("Recording not found", "Unsupported video variant") else 502
+    return jsonify({"error": filename_or_error or "Video playback unavailable"}), status
+
+
+@app.get("/api/media/download/<event_id>/<variant>")
+def download_event_media(event_id: str, variant: str):
+    """Force a named attachment download for the exact ORIGINAL or ENHANCED stored asset."""
+    variant = variant.upper()
+    if variant not in ("ORIGINAL", "ENHANCED"):
+        return jsonify({"error": "Unsupported media variant"}), 400
+
+    event = get_event(event_id)
+    if not event:
+        return jsonify({"error": "Recording not found"}), 404
+    path_key = "original_storage_path" if variant == "ORIGINAL" else "enhanced_storage_path"
+    url_key = "original_url" if variant == "ORIGINAL" else "enhanced_url"
+    storage_path = event.get(path_key)
+    media_url = event.get(url_key)
+    if not storage_path or not media_url:
+        return jsonify({"error": f"{variant.title()} video is not available"}), 404
+
+    source_filename = Path(storage_path).name or f"{event_id}.mp4"
+    safe_event = _safe_media_identifier(event_id) or "nocturpod-video"
+    download_name = f"nocturpod-{safe_event}-{variant.lower()}{Path(source_filename).suffix or '.mp4'}"
+
+    if media_url.startswith(("https://", "http://")):
+        # Supabase Storage supports a download query parameter on signed object URLs.
+        # This ensures cross-origin links return Content-Disposition: attachment instead
+        # of depending on the HTML 'download' attribute, which browsers may ignore.
+        parsed = urllib.parse.urlsplit(media_url)
+        query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+        query = [(key, value) for key, value in query if key.lower() != "download"]
+        query.append(("download", download_name))
+        download_url = urllib.parse.urlunsplit((
+            parsed.scheme, parsed.netloc, parsed.path,
+            urllib.parse.urlencode(query), parsed.fragment
+        ))
+        return redirect(download_url, code=302)
+
+    local_path = MEDIA_DIR / source_filename
+    if local_path.is_file():
+        return send_file(
+            local_path,
+            mimetype="video/mp4",
+            as_attachment=True,
+            download_name=download_name,
+            conditional=True,
+        )
+    return redirect(media_url, code=302)
+
+
 @app.get("/api/media/file/<path:filepath>")
 def serve_local_media_fallback(filepath: str):
     """Resolve legacy relative media URLs through Supabase before using local storage.
@@ -1004,6 +1231,7 @@ def serve_local_media_fallback(filepath: str):
         "original/videos/",
         "enhanced/images/",
         "enhanced/videos/",
+        "playback/videos/",
     )
     if not filepath.startswith(allowed_prefixes):
         return jsonify({"error": "Unsupported media path"}), 404
