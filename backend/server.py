@@ -8,6 +8,7 @@ from __future__ import annotations
 import concurrent.futures
 import datetime
 import hashlib
+import json
 import mimetypes
 import os
 import shutil
@@ -443,7 +444,7 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
             img_bgr = cv2.imread(str(enhanced_local_path))
             if img_bgr is not None:
                 try:
-                    det_res = ENGINE.infer(img_bgr)
+                    det_res = ENGINE.infer(img_bgr, conf=0.22, already_enhanced=True)
                     for d in det_res.get("detections", []):
                         record_detection(event_id, d["label"], d["confidence"], d["x1"], d["y1"], d["x2"], d["y2"])
                 except Exception as det_err:
@@ -512,7 +513,14 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
                 "processing_status": "COMPLETE"
             })
 
-        update_event_status(event_id, status="COMPLETE", ai_status="COMPLETE")
+        quality_metrics = res.get("quality_metrics") if isinstance(res, dict) else None
+        quality_note = (
+            "AI_QUALITY:" + json.dumps(quality_metrics, separators=(",", ":"), ensure_ascii=True)
+            if quality_metrics else "AI enhancement completed; no quality sample was available."
+        )
+        update_event_status(
+            event_id, status="COMPLETE", ai_status="COMPLETE", notes=quality_note
+        )
         log_system_event("INFO", "AI_ENGINE", f"Enhancement completed for event {event_id}")
 
     except Exception as ex:
