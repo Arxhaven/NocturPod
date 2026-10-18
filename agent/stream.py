@@ -16,12 +16,18 @@ class StreamManager:
         self.camera = camera
         self.api_client = api_client
         self.is_streaming = True
+        self.last_luminance: float | None = None
 
     def stream_step(self) -> bool:
         """Grabs one genuine camera frame and pushes to backend."""
         frame = self.camera.read_frame()
         if frame is None:
             return False
+
+        try:
+            self.last_luminance = float(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).mean())
+        except Exception:
+            self.last_luminance = None
 
         ret, jpeg_bytes = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
         if ret:
