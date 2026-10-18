@@ -39,6 +39,10 @@ _INFERENCE_LOCK = threading.Lock()
 _SESSION: Any = None
 _SESSION_ERROR: str | None = None
 _SESSION_MODEL_PATH: str | None = None
+_SESSION_ERROR_AT = 0.0
+# Retry transient model download/session errors automatically instead of disabling
+# enhancement for the entire lifetime of a worker after one failed first request.
+_SESSION_RETRY_AFTER_SECONDS = 60.0
 
 
 class SuperResolutionUnavailable(RuntimeError):
@@ -113,7 +117,7 @@ def _download_model(path: Path) -> None:
 
 
 def _get_session() -> tuple[Any, str]:
-    global _SESSION, _SESSION_ERROR, _SESSION_MODEL_PATH
+    global _SESSION, _SESSION_ERROR, _SESSION_MODEL_PATH, _SESSION_ERROR_AT
     path, custom_path = _model_path()
 
     with _SESSION_LOCK:
@@ -121,7 +125,16 @@ def _get_session() -> tuple[Any, str]:
             return _SESSION, str(path)
 
         if _SESSION_ERROR and _SESSION_MODEL_PATH == str(path):
-            raise SuperResolutionUnavailable(_SESSION_ERROR)
+            error_age = time.monotonic() - _SESSION_ERROR_AT
+            if error_age < _SESSION_RETRY_AFTER_SECONDS:
+                raise SuperResolutionUnavailable(_SESSION_ERROR)
+            print(
+                "[SuperResolution] Previous model initialization failed; "
+                "retrying after cooldown."
+            )
+            _SESSION_ERROR = None
+            _SESSION_MODEL_PATH = None
+            _SESSION_ERROR_AT = 0.0
 
         try:
             import onnxruntime as ort
@@ -131,6 +144,7 @@ def _get_session() -> tuple[Any, str]:
                 f"Real-ESRGAN super-resolution ({type(exc).__name__}: {exc})."
             )
             _SESSION_MODEL_PATH = str(path)
+            _SESSION_ERROR_AT = time.monotonic()
             raise SuperResolutionUnavailable(_SESSION_ERROR) from exc
 
         try:
@@ -168,6 +182,7 @@ def _get_session() -> tuple[Any, str]:
             _SESSION = session
             _SESSION_MODEL_PATH = str(path)
             _SESSION_ERROR = None
+            _SESSION_ERROR_AT = 0.0
             print(
                 f"[SuperResolution] Loaded {MODEL_NAME}; "
                 f"model_sha256={actual_sha}; providers={session.get_providers()}"
@@ -177,11 +192,13 @@ def _get_session() -> tuple[Any, str]:
             _SESSION = None
             _SESSION_ERROR = str(exc)
             _SESSION_MODEL_PATH = str(path)
+            _SESSION_ERROR_AT = time.monotonic()
             raise
         except Exception as exc:
             _SESSION = None
             _SESSION_ERROR = f"Could not initialize Real-ESRGAN ONNX session: {type(exc).__name__}: {exc}"
             _SESSION_MODEL_PATH = str(path)
+            _SESSION_ERROR_AT = time.monotonic()
             raise SuperResolutionUnavailable(_SESSION_ERROR) from exc
 
 
@@ -295,11 +312,12 @@ def upscale_to_4k(frame: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
 
 
 def clear_cached_session_error() -> None:
-    """Allow an operator to retry a previous transient download/initialization failure."""
-    global _SESSION_ERROR, _SESSION_MODEL_PATH
+    """Allow an operator to retry a previous model download/initialization failure immediately."""
+    global _SESSION_ERROR, _SESSION_MODEL_PATH, _SESSION_ERROR_AT
     with _SESSION_LOCK:
         _SESSION_ERROR = None
         _SESSION_MODEL_PATH = None
+        _SESSION_ERROR_AT = 0.0
 
 
 def get_super_resolution_status() -> dict[str, Any]:
