@@ -637,8 +637,22 @@ def get_event(event_id: str) -> dict[str, Any] | None:
     ev["media_type"] = ev.get("type") == "VIDEO_RECORDING" and "VIDEO" or "IMAGE"
     ev["processing_status"] = enh.get("processing_status", "PENDING") if enh else (orig and "PENDING" or "NONE")
     ev["detections"] = detections
+    _attach_quality_metrics(ev)
     return ev
 
+
+
+def _attach_quality_metrics(event: dict[str, Any]) -> dict[str, Any]:
+    """Expose the explainable before/after quality proxy stored by the enhancement worker."""
+    notes = event.get("notes")
+    if isinstance(notes, str) and notes.startswith("AI_QUALITY:"):
+        try:
+            event["quality_metrics"] = json.loads(notes[len("AI_QUALITY:"):])
+        except (TypeError, ValueError):
+            event["quality_metrics"] = None
+    else:
+        event["quality_metrics"] = None
+    return event
 
 
 def _is_stale_enhancement(event: dict[str, Any], stale_after_seconds: int = 3600) -> bool:
@@ -734,19 +748,21 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
             if (status == "ENHANCEMENT_PROCESSING" and _is_stale_enhancement(ev)) or (status == "CAPTURE_REQUESTED" and orig):
                 ev["status"] = "COMPLETE" if (enh or orig) else "FAILED"
                 ev["ai_status"] = "COMPLETE" if enh else "ORIGINAL_PRESERVED"
-                ev["processing_status"] = "COMPLETE" if (enh or orig) else "FAILED"
+                ev["processing_status"] = "COMPLETE" if enh else ("FAILED" if orig else "NONE")
                 orphaned_to_fix.append(eid)
-            else:
-                if enh:
-                    ev["processing_status"] = enh.get("processing_status", "COMPLETE")
-                elif orig:
-                    if status == "ENHANCEMENT_FAILED":
-                        ev["processing_status"] = "FAILED"
-                    else:
-                        ev["processing_status"] = "COMPLETE" if status in ("COMPLETE", "CAPTURED", "RECORDED") else "PENDING"
+            elif enh:
+                ev["processing_status"] = enh.get("processing_status", "COMPLETE")
+            elif orig:
+                if status == "ENHANCEMENT_FAILED" or ev.get("ai_status") in ("FAILED", "ORIGINAL_PRESERVED"):
+                    ev["processing_status"] = "FAILED"
+                elif status in ("AI_BACKFILL_QUEUED", "ENHANCEMENT_PROCESSING", "CAPTURED", "RECORDED") or ev.get("ai_status") in ("PENDING", "PROCESSING"):
+                    ev["processing_status"] = "PENDING"
                 else:
-                    ev["processing_status"] = "NONE"
+                    ev["processing_status"] = "FAILED"
+            else:
+                ev["processing_status"] = "NONE"
 
+            _attach_quality_metrics(ev)
             results.append(ev)
 
         # Asynchronously reconcile orphaned events in Supabase
@@ -824,18 +840,20 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
             if (status == "ENHANCEMENT_PROCESSING" and _is_stale_enhancement(ev)) or (status == "CAPTURE_REQUESTED" and orig):
                 ev["status"] = "COMPLETE" if (enh or orig) else "FAILED"
                 ev["ai_status"] = "COMPLETE" if enh else "ORIGINAL_PRESERVED"
-                ev["processing_status"] = "COMPLETE" if (enh or orig) else "FAILED"
-            else:
-                if enh:
-                    ev["processing_status"] = enh.get("processing_status", "COMPLETE")
-                elif orig:
-                    if status == "ENHANCEMENT_FAILED":
-                        ev["processing_status"] = "FAILED"
-                    else:
-                        ev["processing_status"] = "COMPLETE" if status in ("COMPLETE", "CAPTURED", "RECORDED") else "PENDING"
+                ev["processing_status"] = "COMPLETE" if enh else ("FAILED" if orig else "NONE")
+            elif enh:
+                ev["processing_status"] = enh.get("processing_status", "COMPLETE")
+            elif orig:
+                if status == "ENHANCEMENT_FAILED" or ev.get("ai_status") in ("FAILED", "ORIGINAL_PRESERVED"):
+                    ev["processing_status"] = "FAILED"
+                elif status in ("AI_BACKFILL_QUEUED", "ENHANCEMENT_PROCESSING", "CAPTURED", "RECORDED") or ev.get("ai_status") in ("PENDING", "PROCESSING"):
+                    ev["processing_status"] = "PENDING"
                 else:
-                    ev["processing_status"] = "NONE"
+                    ev["processing_status"] = "FAILED"
+            else:
+                ev["processing_status"] = "NONE"
 
+            _attach_quality_metrics(ev)
             results.append(ev)
         return results
 
