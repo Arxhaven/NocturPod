@@ -585,6 +585,17 @@ def record_media_asset(data: dict[str, Any]) -> dict[str, Any]:
     return record
 
 
+def clear_detections_for_event(event_id: str) -> None:
+    """Replace previous detector results when a media item is reprocessed."""
+    if has_supabase_config():
+        encoded_event_id = urllib.parse.quote(str(event_id), safe="")
+        _supabase_request(f"detections?event_id=eq.{encoded_event_id}", method="DELETE")
+        return
+    with _LOCK, _get_local_connection() as conn:
+        conn.execute("DELETE FROM detections WHERE event_id = ?", (event_id,))
+        conn.commit()
+
+
 def record_detection(event_id: str, label: str, confidence: float, x1: float, y1: float, x2: float, y2: float) -> None:
     record = {
         "event_id": event_id,
