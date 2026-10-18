@@ -29,6 +29,7 @@ from backend.database import (
     ack_command,
     check_device_timeouts,
     create_event,
+    clear_detections_for_event,
     generate_event_id,
     get_device_status,
     get_event,
@@ -440,13 +441,15 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
                 update_event_status(event_id, status="ENHANCEMENT_FAILED", ai_status="FAILED", notes=res.get("error"))
                 return
 
-            # Object detection on enhanced image (safely isolated)
+            # Compute detections without mutating the database yet. During legacy
+            # reprocessing, old results remain available until the new enhanced asset
+            # has been saved successfully.
+            pending_detections: list[dict[str, Any]] = []
             img_bgr = cv2.imread(str(enhanced_local_path))
             if img_bgr is not None:
                 try:
                     det_res = ENGINE.infer(img_bgr, conf=0.22, already_enhanced=True)
-                    for d in det_res.get("detections", []):
-                        record_detection(event_id, d["label"], d["confidence"], d["x1"], d["y1"], d["x2"], d["y2"])
+                    pending_detections = det_res.get("detections", [])
                 except Exception as det_err:
                     print(f"[AI Detection] Notice: Vision detection non-fatal skip ({det_err})")
 
@@ -465,6 +468,14 @@ def _process_enhancement_async(event_id: str, device_id: str, orig_path: Path, m
                 return
 
             # Record ENHANCED media asset
+            # Replace earlier detection rows only after the enhanced asset is safely stored.
+            clear_detections_for_event(event_id)
+            for detection in pending_detections:
+                record_detection(
+                    event_id, detection["label"], detection["confidence"],
+                    detection["x1"], detection["y1"], detection["x2"], detection["y2"]
+                )
+
             record_media_asset({
                 "id": f"med_{event_id}_enhanced",
                 "event_id": event_id,
