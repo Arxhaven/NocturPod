@@ -667,7 +667,9 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
     """Retrieves events in batch with high performance, pre-warming signed URLs and reconciling orphaned records."""
     if has_supabase_config():
         query = f"events?select=*&order=timestamp.desc&limit={limit}&offset={max(0, int(offset))}"
-        if filter_type and filter_type != "ALL":
+        if filter_type == "IMAGE_CAPTURE":
+            query += "&type=in.(MANUAL_CAPTURE,MOTION_CAPTURE)"
+        elif filter_type and filter_type != "ALL":
             query += f"&type=eq.{filter_type}"
         if search and search.strip():
             query += f"&or=(event_id.ilike.*{search.strip()}*,notes.ilike.*{search.strip()}*)"
@@ -766,7 +768,10 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
         q = "SELECT * FROM events"
         params: list[Any] = []
         conds = []
-        if filter_type and filter_type != "ALL":
+        if filter_type == "IMAGE_CAPTURE":
+            conds.append("type IN (?, ?)")
+            params.extend(["MANUAL_CAPTURE", "MOTION_CAPTURE"])
+        elif filter_type and filter_type != "ALL":
             conds.append("type = ?")
             params.append(filter_type)
         if search and search.strip():
@@ -838,7 +843,7 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
 
 def list_media_events(media_type: str = "IMAGE") -> list[dict[str, Any]]:
     """Fetches completed or in-progress events with original and enhanced media URLs."""
-    target_type = "MANUAL_CAPTURE" if media_type == "IMAGE" else "VIDEO_RECORDING"
+    target_type = "IMAGE_CAPTURE" if media_type == "IMAGE" else "VIDEO_RECORDING"
     events = list_events(limit=1000, filter_type=target_type)
     return events
 
