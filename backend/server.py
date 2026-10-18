@@ -716,11 +716,11 @@ def _reprocess_existing_media_worker(
 
 
 def _queue_missing_media_backfill(base_url: str, force_failed: bool = False) -> dict[str, Any]:
-    """Queue every persisted capture/recording with an ORIGINAL but no ENHANCED asset.
+    """Queue captures whose existing enhanced asset is absent or predates Real-ESRGAN 4K.
 
-    The original object and asset record are never overwritten. Event status is
-    claimed before a job is submitted so subsequent gallery refreshes do not queue
-    the same item again.
+    The original object is never overwritten. Event status is claimed before a job
+    is submitted so subsequent gallery refreshes do not queue the same item again.
+    Failed jobs only retry when this authenticated endpoint explicitly forces retries.
     """
     queued: list[str] = []
     skipped: list[dict[str, str]] = []
