@@ -177,6 +177,18 @@ export default function ImageViewerModal({ image, onClose, onDelete }) {
               <span className="meta-val mono">IR CAST → GRAYSCALE</span>
             </div>
           )}
+          {quality?.resolution_before && quality?.resolution_after && (
+            <div className="meta-cell" title={quality?.upscaler || 'Learned super-resolution output resolution'}>
+              <span className="meta-label mono">SOURCE → OUTPUT</span>
+              <span className="meta-val mono">{quality.resolution_before} → {quality.resolution_after}</span>
+            </div>
+          )}
+          {quality?.upscaler && (
+            <div className="meta-cell" title={quality?.explanation || 'Learned super-resolution model'}>
+              <span className="meta-label mono">RESTORATION MODEL</span>
+              <span className="meta-val mono">{quality.upscaler}</span>
+            </div>
+          )}
         </div>
         {qualityBefore != null && (
           <div className="quality-disclaimer mono">*Heuristic exposure / contrast / detail / noise score; not a person-recognition accuracy percentage.</div>
