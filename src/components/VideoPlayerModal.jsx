@@ -39,8 +39,12 @@ export default function VideoPlayerModal({ video, onClose, onDelete }) {
           <div className="v-title-group">
             <span className="v-id mono">{video.event_id || video.id}</span>
             <div className="v-status-indicator">
-              {isEnhancedReady ? (
-                <span className="tag-complete mono"><CheckCircle2 size={13} /> ENHANCED</span>
+              {video.status === 'ENHANCEMENT_FAILED' ? (
+                <span className="tag-original mono">
+                  {enhancedUrl ? 'UPDATE FAILED · LAST VERSION KEPT' : 'ENHANCEMENT FAILED'}
+                </span>
+              ) : isEnhancedReady ? (
+                <span className="tag-complete mono"><CheckCircle2 size={13} /> ENHANCED · 4K TARGET</span>
               ) : isEnhancing ? (
                 <span className="tag-processing mono"><Clock size={13} /> ENHANCING...</span>
               ) : (
