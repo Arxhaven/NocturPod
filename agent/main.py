@@ -74,6 +74,7 @@ class NocturPodAgent:
                 "did not initialize. Check gpiozero/lgpio installation, permissions, and "
                 "HC-SR501 OUT -> BCM GPIO 17 (physical pin 11) / common GND."
             )
+        print(f"[PIR] Runtime diagnostic: {self.pir_sensor.get_status()}")
         if self.lighting.pwm_enabled:
             for mode in ("WHITE", "NIGHT"):
                 intensity = self.runtime_settings["lighting"].get(f"{mode.lower()}_intensity", 100)
@@ -233,6 +234,17 @@ class NocturPodAgent:
         else:
             print(f"[PIR] Motion capture failed: {error}")
 
+    def pir_watchdog_worker(self) -> None:
+        """Poll the sensor state as a fallback if gpiozero misses a callback edge."""
+        while self.is_running:
+            try:
+                if self.pir_enabled and self.pir_sensor.poll_motion_edge():
+                    print("[PIR] Motion edge detected by watchdog poll; dispatching capture.")
+                    self._on_pir_motion()
+            except Exception as exc:
+                print(f"[PIR] Watchdog poll error: {exc}")
+            time.sleep(0.20)
+
     def run(self) -> None:
         # Start background threads
         t_hb = threading.Thread(target=self.heartbeat_worker, name="heartbeat", daemon=True)
@@ -241,6 +253,8 @@ class NocturPodAgent:
         t_hb.start()
         t_cmd.start()
         t_upload.start()
+        t_pir = threading.Thread(target=self.pir_watchdog_worker, name="pir-watchdog", daemon=True)
+        t_pir.start()
 
         print("[NocturPod Agent] Edge daemon running. Streaming real camera frames...")
         try:
