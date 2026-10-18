@@ -640,11 +640,17 @@ def get_event(event_id: str) -> dict[str, Any] | None:
     # Format media asset URLs
     orig = next((a for a in assets if a.get("variant") == "ORIGINAL"), None)
     enh = next((a for a in assets if a.get("variant") == "ENHANCED"), None)
+    stream_orig = next((a for a in assets if a.get("variant") == "STREAM_ORIGINAL"), None)
+    stream_enh = next((a for a in assets if a.get("variant") == "STREAM_ENHANCED"), None)
 
     ev["original_storage_path"] = orig.get("storage_path") if orig else None
     ev["enhanced_storage_path"] = enh.get("storage_path") if enh else None
+    ev["original_stream_storage_path"] = stream_orig.get("storage_path") if stream_orig else None
+    ev["enhanced_stream_storage_path"] = stream_enh.get("storage_path") if stream_enh else None
     ev["original_url"] = get_signed_storage_url(orig["storage_path"]) if orig else None
     ev["enhanced_url"] = get_signed_storage_url(enh["storage_path"]) if enh else None
+    ev["original_stream_url"] = get_signed_storage_url(stream_orig["storage_path"]) if stream_orig else None
+    ev["enhanced_stream_url"] = get_signed_storage_url(stream_enh["storage_path"]) if stream_enh else None
     ev["media_type"] = ev.get("type") == "VIDEO_RECORDING" and "VIDEO" or "IMAGE"
     ev["processing_status"] = enh.get("processing_status", "PENDING") if enh else (orig and "PENDING" or "NONE")
     ev["detections"] = detections
@@ -755,11 +761,17 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
 
             orig = next((a for a in assets if a.get("variant") == "ORIGINAL"), None)
             enh = next((a for a in assets if a.get("variant") == "ENHANCED"), None)
+            stream_orig = next((a for a in assets if a.get("variant") == "STREAM_ORIGINAL"), None)
+            stream_enh = next((a for a in assets if a.get("variant") == "STREAM_ENHANCED"), None)
 
             ev["original_storage_path"] = orig.get("storage_path") if orig else None
             ev["enhanced_storage_path"] = enh.get("storage_path") if enh else None
+            ev["original_stream_storage_path"] = stream_orig.get("storage_path") if stream_orig else None
+            ev["enhanced_stream_storage_path"] = stream_enh.get("storage_path") if stream_enh else None
             ev["original_url"] = get_signed_storage_url(orig["storage_path"]) if orig else None
             ev["enhanced_url"] = get_signed_storage_url(enh["storage_path"]) if enh else None
+            ev["original_stream_url"] = get_signed_storage_url(stream_orig["storage_path"]) if stream_orig else None
+            ev["enhanced_stream_url"] = get_signed_storage_url(stream_enh["storage_path"]) if stream_enh else None
             ev["media_type"] = "VIDEO" if ev.get("type") == "VIDEO_RECORDING" else "IMAGE"
             ev["detections"] = detections
 
@@ -851,11 +863,17 @@ def list_events(limit: int = 50, filter_type: str | None = None, search: str | N
 
             orig = next((a for a in assets if a.get("variant") == "ORIGINAL"), None)
             enh = next((a for a in assets if a.get("variant") == "ENHANCED"), None)
+            stream_orig = next((a for a in assets if a.get("variant") == "STREAM_ORIGINAL"), None)
+            stream_enh = next((a for a in assets if a.get("variant") == "STREAM_ENHANCED"), None)
 
             ev["original_storage_path"] = orig.get("storage_path") if orig else None
             ev["enhanced_storage_path"] = enh.get("storage_path") if enh else None
+            ev["original_stream_storage_path"] = stream_orig.get("storage_path") if stream_orig else None
+            ev["enhanced_stream_storage_path"] = stream_enh.get("storage_path") if stream_enh else None
             ev["original_url"] = get_signed_storage_url(orig["storage_path"]) if orig else None
             ev["enhanced_url"] = get_signed_storage_url(enh["storage_path"]) if enh else None
+            ev["original_stream_url"] = get_signed_storage_url(stream_orig["storage_path"]) if stream_orig else None
+            ev["enhanced_stream_url"] = get_signed_storage_url(stream_enh["storage_path"]) if stream_enh else None
             ev["media_type"] = "VIDEO" if ev.get("type") == "VIDEO_RECORDING" else "IMAGE"
             ev["detections"] = detections
 
