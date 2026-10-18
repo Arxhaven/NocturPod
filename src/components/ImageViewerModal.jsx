@@ -13,7 +13,7 @@ import { resolveMediaUrl, detectEventObjects } from '../services/api';
 import './ImageViewerModal.css';
 
 function parseImageResolution(value) {
-  const match = String(value || '').match(/(\\d{2,5})\\s*x\\s*(\\d{2,5})/i);
+  const match = String(value || '').match(/(\d{2,5})\s*x\s*(\d{2,5})/i);
   return match ? { width: Number(match[1]), height: Number(match[2]) } : null;
 }
 
