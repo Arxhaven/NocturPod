@@ -34,7 +34,7 @@ class CaptureController:
         self.api_client = api_client
         self.spool = spool
 
-    def capture_image(self) -> tuple[bool, str, str | None]:
+    def capture_image(self, capture_source: str = "MANUAL") -> tuple[bool, str, str | None]:
         """Captures a real frame from the OV5647 camera, saves locally as ORIGINAL,
         and uploads to backend or spools for retry.
         Returns: (success, event_id, error_message)
@@ -52,10 +52,16 @@ class CaptureController:
             return False, event_id, "Failed to write image to disk"
 
         # Try immediate upload
-        uploaded = self.api_client.upload_media(file_path, event_id=event_id, media_type="IMAGE", duration="0s")
+        uploaded = self.api_client.upload_media(
+            file_path, event_id=event_id, media_type="IMAGE", duration="0s",
+            capture_source=capture_source
+        )
         if not uploaded:
-            # Retain locally and spool for network recovery
-            self.spool.enqueue(file_path, event_id=event_id, media_type="IMAGE", duration="0s")
+            # Retain locally and spool for network recovery without losing the trigger source.
+            self.spool.enqueue(
+                file_path, event_id=event_id, media_type="IMAGE", duration="0s",
+                capture_source=capture_source
+            )
 
         return True, event_id, None
 
